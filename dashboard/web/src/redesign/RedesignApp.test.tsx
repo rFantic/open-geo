@@ -161,6 +161,15 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   });
 }
 
+function pdfResponse(): Response {
+  return {
+    ok: true,
+    status: 200,
+    blob: () =>
+      Promise.resolve(new Blob(["%PDF-1.4 fake"], { type: "application/pdf" })),
+  } as unknown as Response;
+}
+
 function installFetch(overrides: RouterOverrides = {}) {
   const calls: { url: string; method: string }[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -173,9 +182,7 @@ function installFetch(overrides: RouterOverrides = {}) {
 
     if (path === "/api/report") {
       if (overrides.report) return overrides.report(init);
-      return new Response(new Blob(["%PDF-1.4 fake"], { type: "application/pdf" }), {
-        status: 200,
-      });
+      return pdfResponse();
     }
 
     if (path === "/api/i18n") {
@@ -821,9 +828,7 @@ describe("RedesignApp — PDF export", () => {
     const clickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
-    resolveReport(
-      new Response(new Blob(["%PDF"], { type: "application/pdf" }), { status: 200 }),
-    );
+    resolveReport(pdfResponse());
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Download PDF/i })).toBeEnabled(),
     );
