@@ -1,0 +1,16 @@
+{
+  "name": "open-geo-marketplace",
+  "owner": {
+    "name": "open-geo contributors"
+  },
+  "description": "Single-plugin marketplace for open-geo, the GEO visibility tracker.",
+  "plugins": [
+    {
+      "name": "open-geo",
+      "source": "./",
+      "description": "GEO visibility tracker: run queries through an AI engine, measure a target domain's visibility/citation in the answers, and emit a dashboard or PDF report.",
+      "version": "0.1.0",
+      "license": "MIT"
+    }
+  ]
+}

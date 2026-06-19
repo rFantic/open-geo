@@ -1,0 +1,358 @@
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+from pipeline.aggregate import aggregate_run
+from pipeline.db import (
+    create_run,
+    get_conn,
+    get_or_create_brand,
+    update_run_counts,
+)
+from pipeline.ingest import insert_capture
+from pipeline.schema import Link, QueryCapture, normalize_domain
+
+DB_PATH = "data/aeo.db"
+BRAND_NAME = "Acme"
+BRAND_DOMAIN = "acme.com"
+ENGINE = "google_ai_overview"
+TARGET = normalize_domain(BRAND_DOMAIN)
+
+_OTHER_DOMAINS = [
+    "restwell.com",
+    "nordsleep.com",
+    "dreamforge.com",
+    "ikea.com",
+    "wirecutter.com",
+    "sleepfoundation.org",
+    "consumerreports.org",
+    "reddit.com",
+    "tomsguide.com",
+    "goodhousekeeping.com",
+]
+
+_QUERIES = {
+    "general": [
+        "how to choose an orthopedic mattress",
+        "best mattresses for sleep 2026",
+        "which mattress to buy for back pain",
+        "pocket spring mattress reviews",
+        "foam mattress vs spring which is better",
+        "top mattresses for a queen bed",
+        "which mattress filling lasts the longest",
+        "how to choose a mattress for a teenager",
+    ],
+    "branded": [
+        "Acme mattress reviews",
+        "Acme orthopedic mattress price",
+        "Acme store near me",
+        "Acme mattress warranty and returns",
+        "Acme pillow for side sleepers",
+        "Acme mattress sale",
+        "Acme adjustable bed frame",
+        "compare Acme mattress models",
+    ],
+    "comparative": [
+        "Acme vs Restwell which is better",
+        "Acme vs IKEA mattresses",
+        "should I pick Acme or NordSleep",
+        "Acme vs DreamForge mattress comparison",
+        "Acme or Restwell for back pain",
+        "Acme vs NordSleep customer reviews",
+        "Acme and DreamForge which to choose",
+        "Acme vs a no-name marketplace mattress",
+    ],
+}
+
+_SENTIMENTS_POS = [
+    "recommended as a leading brand, mentioned with a direct catalog link",
+    "named a reliable choice for orthopedic mattresses",
+    "listed first among the suitable options",
+    "mentioned positively, noted for a wide store network",
+]
+_SENTIMENTS_NEUTRAL = [
+    "mentioned neutrally among several alternatives",
+    "listed alongside other popular manufacturers",
+    "named without a clear judgement, next to competitors",
+]
+
+
+def _link(rank: int, domain: str, slug: str) -> Link:
+    if domain == TARGET:
+        url = f"https://{domain}/catalog/{slug}"
+    else:
+        url = f"https://www.{domain}/{slug}"
+    return Link(rank=rank, url=url, domain=domain)
+
+
+def _build_sources(
+    rng: random.Random, n_sources: int, target_positions: list[int]
+) -> list[Link]:
+    pool = rng.sample(_OTHER_DOMAINS, k=min(len(_OTHER_DOMAINS), n_sources))
+    links: list[Link] = []
+    other_i = 0
+    for rank in range(1, n_sources + 1):
+        if rank in target_positions:
+            links.append(_link(rank, TARGET, f"matras-{rank}"))
+        else:
+            dom = pool[other_i % len(pool)]
+            other_i += 1
+            links.append(_link(rank, dom, f"article-{rank}"))
+    return links
+
+
+def _make_capture(
+    rng: random.Random,
+    query: str,
+    lens: str,
+    captured_at: datetime,
+    *,
+    overview_present: bool,
+    in_sources: bool,
+    cited: bool,
+    multi_rank: bool,
+    n_idx: int,
+) -> QueryCapture:
+    screenshot = f"data/screenshots/seed/{lens}_{n_idx:03d}.png"
+
+    if not overview_present:
+        return QueryCapture(
+            query=query,
+            lens=lens,  # type: ignore[arg-type]
+            engine=ENGINE,
+            captured_at=captured_at,
+            answer_text_md=None,
+            screenshot_path=screenshot,
+            overview_present=False,
+            sources=[],
+            citations=[],
+            target_source_ranks=[],
+            target_citation_ranks=[],
+            brand_in_answer_text=False,
+            sentiment=None,
+        )
+
+    n_sources = rng.randint(3, 6)
+
+    if not in_sources:
+        sources = _build_sources(rng, n_sources, target_positions=[])
+        brand_in_text = rng.random() < 0.25
+        target_present_anywhere = brand_in_text
+        return QueryCapture(
+            query=query,
+            lens=lens,  # type: ignore[arg-type]
+            engine=ENGINE,
+            captured_at=captured_at,
+            answer_text_md="Several mattress options from different manufacturers are compared.",
+            screenshot_path=screenshot,
+            overview_present=True,
+            sources=sources,
+            citations=[],
+            target_source_ranks=[],
+            target_citation_ranks=[],
+            brand_in_answer_text=brand_in_text,
+            sentiment=(rng.choice(_SENTIMENTS_NEUTRAL) if target_present_anywhere else None),
+        )
+
+    if multi_rank and n_sources >= 4:
+        first = rng.randint(1, 2)
+        second = rng.randint(3, n_sources)
+        target_positions = sorted({first, second})
+    else:
+        target_positions = [rng.randint(1, n_sources)]
+
+    sources = _build_sources(rng, n_sources, target_positions)
+    source_domains = [link.domain for link in sources]
+
+    if cited:
+        n_cit = rng.randint(1, 2)
+        citations = [_link(i + 1, TARGET, f"cit-{i + 1}") for i in range(n_cit)]
+        target_citation_ranks = list(range(1, n_cit + 1))
+    else:
+        other_source_domains = [d for d in source_domains if d != TARGET]
+        if other_source_domains and rng.random() < 0.5:
+            dom = rng.choice(other_source_domains)
+            citations = [_link(1, dom, "ref")]
+        else:
+            citations = []
+        target_citation_ranks = []
+
+    sentiment = rng.choice(_SENTIMENTS_POS if min(target_positions) == 1 else _SENTIMENTS_NEUTRAL)
+
+    return QueryCapture(
+        query=query,
+        lens=lens,  # type: ignore[arg-type]
+        engine=ENGINE,
+        captured_at=captured_at,
+        answer_text_md=(
+            "Among the suitable options, **Acme** is frequently mentioned — "
+            "a well-known maker of orthopedic mattresses."
+        ),
+        screenshot_path=screenshot,
+        overview_present=True,
+        sources=sources,
+        citations=citations,
+        target_source_ranks=list(target_positions),
+        target_citation_ranks=target_citation_ranks,
+        brand_in_answer_text=True,
+        sentiment=sentiment,
+    )
+
+
+def _build_run_captures(
+    rng: random.Random, run_idx: int, run_at: datetime
+) -> list[QueryCapture]:
+    captures: list[QueryCapture] = []
+    n_idx = 0
+
+    overview_rate = 0.60 + 0.06 * run_idx
+    in_sources_rate = 0.35 + 0.08 * run_idx
+
+    for lens, queries in _QUERIES.items():
+        for q_i, query in enumerate(queries):
+            n_idx += 1
+            captured_at = run_at + timedelta(minutes=7 * n_idx)
+
+            overview_present = rng.random() < overview_rate
+            if q_i == len(queries) - 1 and lens == "general":
+                overview_present = False
+
+            if lens == "comparative":
+                in_sources = False
+                cited = False
+                multi_rank = False
+            elif lens == "branded" and q_i == 0:
+                overview_present = True
+                in_sources = True
+                cited = True
+                multi_rank = True
+            else:
+                in_sources = overview_present and (rng.random() < in_sources_rate)
+                cited = in_sources and (rng.random() < 0.55)
+                multi_rank = in_sources and lens == "branded" and (q_i % 3 == 0)
+
+            captures.append(
+                _make_capture(
+                    rng,
+                    query,
+                    lens,
+                    captured_at,
+                    overview_present=overview_present,
+                    in_sources=in_sources,
+                    cited=cited,
+                    multi_rank=multi_rank,
+                    n_idx=n_idx,
+                )
+            )
+
+    return captures
+
+
+def _reset_db(db_path: str) -> None:
+    for suffix in ("", "-wal", "-shm"):
+        p = Path(db_path + suffix)
+        if p.exists():
+            p.unlink()
+            print(f"seed_demo: removed {p}", file=sys.stderr)
+
+
+def seed(db_path: str = DB_PATH, *, reset: bool = False, seed_value: int = 20260618) -> dict[str, Any]:
+    if reset:
+        _reset_db(db_path)
+
+    rng = random.Random(seed_value)
+
+    conn = get_conn(db_path)
+    try:
+        from pipeline.db import init_db
+
+        init_db(conn)
+        brand_id = get_or_create_brand(conn, BRAND_NAME, BRAND_DOMAIN)
+
+        n_runs = 5
+        base = datetime(2026, 5, 12, 9, 0, 0, tzinfo=timezone.utc)
+        latest_summary: Optional[dict[str, Any]] = None
+
+        for run_idx in range(n_runs):
+            run_at = base + timedelta(days=7 * run_idx)
+            run_id = create_run(conn, brand_id, ENGINE)
+            conn.execute(
+                "UPDATE runs SET run_at = ? WHERE id = ?",
+                (run_at.isoformat(), run_id),
+            )
+            conn.commit()
+
+            captures = _build_run_captures(rng, run_idx, run_at)
+            for cap in captures:
+                insert_capture(conn, run_id, cap)
+            conn.commit()
+
+            update_run_counts(
+                conn,
+                run_id,
+                n_queries=len(captures),
+                n_ok=len(captures),
+                n_failed=0,
+                status="done",
+            )
+
+            latest_summary = aggregate_run(conn, run_id)
+            print(
+                f"seed_demo: run {run_id} ({run_at.date()}) — {len(captures)} results, metrics filled",
+                file=sys.stderr,
+            )
+
+        counts = {
+            "brands": conn.execute("SELECT COUNT(*) FROM brands").fetchone()[0],
+            "runs": conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0],
+            "results": conn.execute("SELECT COUNT(*) FROM results").fetchone()[0],
+            "metrics": conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0],
+        }
+
+        latest_all = None
+        if latest_summary is not None:
+            latest_all = next(
+                (m for m in latest_summary["metrics"] if m["lens"] == "all"), None
+            )
+
+        return {
+            "db_path": db_path,
+            "brand": {"id": brand_id, "name": BRAND_NAME, "domain": TARGET},
+            "counts": counts,
+            "latest_run_id": latest_summary["run_id"] if latest_summary else None,
+            "latest_all_metrics": latest_all,
+        }
+    finally:
+        conn.close()
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="pipeline.seed_demo",
+        description="Seed data/aeo.db with a realistic multi-run demo dataset for Acme.",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete data/aeo.db (+ -wal/-shm) before seeding.",
+    )
+    parser.add_argument(
+        "--db",
+        default=DB_PATH,
+        help="SQLite DB path (default: data/aeo.db).",
+    )
+    args = parser.parse_args(argv)
+
+    summary = seed(args.db, reset=args.reset)
+    print(json.dumps(summary, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

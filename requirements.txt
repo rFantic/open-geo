@@ -1,0 +1,8 @@
+pydantic>=2,<3
+reportlab
+matplotlib
+fastapi
+uvicorn
+pytest
+pytest-cov
+httpx

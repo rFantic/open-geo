@@ -1,0 +1,114 @@
+name: CI
+
+# Tests + coverage for both halves of open-geo:
+#   - Python backend (pipeline / report / dashboard)  -> pytest + coverage.py (branch)
+#   - React/TS dashboard frontend (dashboard/web)      -> vitest + v8 coverage
+# Each job enforces a STRICT 95% coverage gate, prints the coverage table to the
+# GitHub job summary, and uploads the machine-readable report as an artifact.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel an in-progress run when a new commit is pushed to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python · pytest + coverage (95% gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests with branch coverage (fail under 95%)
+        run: |
+          set -o pipefail
+          python -m pytest \
+            --cov \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=95 \
+            | tee pytest-coverage.txt
+
+      - name: Coverage → job summary
+        if: always()
+        run: |
+          {
+            echo "## 🐍 Python coverage"
+            echo '```'
+            # The coverage table + the "Total coverage" line are at the tail.
+            sed -n '/tests coverage/,$p' pytest-coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage.xml
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: coverage.xml
+          if-no-files-found: warn
+
+  frontend:
+    name: Frontend · vitest + coverage (95% gate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with v8 coverage (fail under 95%)
+        run: |
+          set -o pipefail
+          npx vitest run --coverage \
+            --coverage.thresholds.lines=95 \
+            --coverage.thresholds.statements=95 \
+            --coverage.thresholds.functions=95 \
+            --coverage.thresholds.branches=95 \
+            | tee vitest-coverage.txt
+
+      - name: Coverage → job summary
+        if: always()
+        run: |
+          {
+            echo "## ⚛️ Frontend coverage"
+            echo '```'
+            sed -n '/Coverage report from v8/,$p' vitest-coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload lcov report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: dashboard/web/coverage/lcov.info
+          if-no-files-found: warn

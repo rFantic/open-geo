@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "open-geo-api",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "OPEN_GEO_DB=data/_dashboard_demo.db .venv/bin/python -m uvicorn dashboard.api:app --host 127.0.0.1 --port 8077"
+      ],
+      "port": 8077
+    },
+    {
+      "name": "open-geo-dashboard",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd dashboard/web && VITE_API_BASE=http://127.0.0.1:8077 npm run dev"
+      ],
+      "port": 5173
+    }
+  ]
+}

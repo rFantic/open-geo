@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# open-geo .gitignore
+# Everything generated, local, or machine-specific. Source + the committed
+# skill (.claude/skills/), i18n/, examples/, requirements.txt, and
+# .claude-plugin/ are intentionally NOT ignored.
+# ---------------------------------------------------------------------------
+
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Coverage (pytest-cov / coverage.py) ---
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*-coverage.txt
+
+# --- Local SQLite databases (recreated via seed_demo / runs) ---
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.sqlite
+data/*.sqlite3
+# throwaway fixture DBs (e.g. data/_fixture_dash.db)
+data/_*.db
+
+# --- Captured run artifacts (visible-Chrome captures) ---
+data/screenshots/
+data/responses/
+
+# --- Generated reports (recreated by report.generate) ---
+reports/*.pdf
+reports/*.png
+
+# --- Dashboard frontend (Node) ---
+dashboard/web/node_modules/
+dashboard/web/dist/
+dashboard/web/.vite/
+*.tsbuildinfo
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# --- IDE project dirs (machine-specific) ---
+.idea/
+.vscode/
+
+# --- Logs ---
+*.log
+
+# --- Local Claude Code settings (machine-specific; skills stay committed) ---
+.claude/settings.local.json

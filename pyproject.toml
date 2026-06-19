@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-geo"
+version = "0.1.0"
+description = "GEO (Generative Engine Optimization) visibility tracker — pipeline, report, dashboard."
+requires-python = ">=3.11"
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# NOTE: --cov is intentionally NOT in addopts. Per-module agent runs pass their
+# own --cov=<module>; the CI gate adds --cov-fail-under=95 explicitly. Keeping
+# coverage out of the default invocation means a single-file run never spuriously
+# "fails under" while a module is mid-development.
+addopts = "-q --strict-markers --strict-config"
+xfail_strict = true
+markers = [
+    "slow: heavier end-to-end tests (PDF render, subprocess CLI, full report).",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:reportlab.*",
+]
+
+# ---------------------------------------------------------------------------
+# coverage.py  (gate is enforced in CI via: pytest --cov-fail-under=95)
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["pipeline", "report", "dashboard"]
+omit = [
+    "*/web/*",        # the React frontend is measured by Vitest, not coverage.py
+    "tests/*",
+    "conftest.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]
