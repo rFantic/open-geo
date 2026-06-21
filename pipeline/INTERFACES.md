@@ -17,8 +17,10 @@
 ## 1. The capture contract — `QueryCapture` JSON
 
 The **capture agent** drives an engine (e.g. Google AI Overview) for one
-`(query, lens)` and emits **one `QueryCapture` JSON object per query**. A batch
-is a **JSON array** of these objects, fed to the ingest CLI on STDIN.
+`(query, lens)` and emits **one `QueryCapture` JSON object per query**, which it
+**returns to the orchestrator** — a capture agent never writes to the database
+itself. The **orchestrator** collects the per-query objects into a **JSON array**
+and feeds that batch to the ingest CLI on STDIN.
 
 Canonical model: `pipeline/schema.py :: QueryCapture` (pydantic v2). Ingest
 validates every object against it.
@@ -29,10 +31,10 @@ validates every object against it.
 |---|---|---|---|
 | `query` | string | yes | The exact query sent to the engine. |
 | `lens` | `"general" \| "branded" \| "comparative"` | yes | Framing of the query. `general` = neutral, no brand named; `branded` = brand explicitly named; `comparative` = brand vs alternatives. |
-| `engine` | string | yes | Engine id, snake_case, e.g. `"google_ai_overview"`. |
+| `engine` | string | yes | Engine id, snake_case — the orchestrator's `<engine>` argument **copied through verbatim** (it equals the capture playbook basename, e.g. `google` ↔ `engines/google.md`); do not hardcode a different value. **Open string by design** — this is the multi-engine extension point: one `engines/<engine>.md` playbook per engine, and supporting more (ChatGPT, Gemini, Claude, Perplexity, Yandex, DeepSeek, …) is a backlog item (ROADMAP Feature 3). |
 | `captured_at` | string (ISO-8601 datetime) | yes | When the answer was captured. Parsed by pydantic into `datetime`. Use UTC, e.g. `"2026-06-18T20:15:30Z"`. |
 | `answer_text_md` | string \| null | no (default `null`) | The answer prose as Markdown. `null` if no overview / not captured. |
-| `screenshot_path` | string \| null | no (default `null`) | Path (relative to repo root) to a screenshot, e.g. `data/screenshots/<run>/<n>.png`. |
+| `screenshot_path` | string \| null | no (default `null`) | **v1: always `null`.** A *transient* screenshot may be taken to read the overview, but screenshots are **not persisted**, so nothing is stored here (column kept for forward-compat). |
 | `overview_present` | bool | yes | Did an AI Overview actually render for this query? This is the **denominator gate** for visibility metrics. |
 | `sources` | array of `Link` | no (default `[]`) | The **relied-on / retrieved set** — every link the model drew on, in display order, **duplicate domains allowed**. This **includes every cited domain**: fold any inline-cited link into `sources` (the visible Google "sources panel" is only a *partial* view of the retrieval set, so a domain cited in the prose but missing from the panel is still a source). |
 | `citations` | array of `Link` | no (default `[]`) | Links **attached / cited** in the answer prose, in order, duplicates allowed. Citations are a **subset of `sources`** (the model can only cite what it retrieved) — every domain here MUST also appear in `sources`. |
@@ -67,6 +69,9 @@ validates every object against it.
   in links). If it appeared anywhere, write one short qualitative phrase.
 - Determine `domain` (and the target domain you match against) via
   `normalize_domain` so matching is consistent across the pipeline.
+- `screenshot_path` is **`null`** in v1: a screenshot may be taken to *read* the
+  overview (required — `get_page_text` drops the AI block), but it is **not saved**
+  as an artifact.
 
 ### 1.3 Example `QueryCapture` JSON object
 
@@ -74,10 +79,10 @@ validates every object against it.
 {
   "query": "best mattress for back sleepers",
   "lens": "general",
-  "engine": "google_ai_overview",
+  "engine": "google",
   "captured_at": "2026-06-18T20:15:30Z",
   "answer_text_md": "For back sleepers, models with firm support are often recommended in this range. **Acme** offers several suitable options...",
-  "screenshot_path": "data/screenshots/42/0003.png",
+  "screenshot_path": null,
   "overview_present": true,
   "sources": [
     { "rank": 1, "url": "https://www.sleepfoundation.org/best-mattress", "domain": "sleepfoundation.org" },
@@ -212,7 +217,8 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 - Validates **each** object against `pipeline.schema.QueryCapture`.
 - Writes every **valid** row to `results` (serializing arrays to the `*_json`
   columns). **Invalid rows do NOT abort the batch** — they are collected into
-  `errors` so the capture agent can fix and re-send.
+  `errors` so the **orchestrator** can fix and re-send (re-capturing via the
+  relevant worker if needed).
 - Should update run counters (`n_queries`, `n_ok`, `n_failed`) via
   `update_run_counts`.
 - **STDOUT:**
@@ -240,7 +246,7 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
   {
     "run_id": N,
     "brand_id": 1,
-    "engine": "google_ai_overview",
+    "engine": "google",
     "metrics": [
       { "lens": "all", "n_queries": 30, "n_overviews": 22, "overview_coverage": 0.733,
         "n_in_sources": 9, "visibility_in_sources": 0.409,
@@ -287,6 +293,17 @@ actually **cited** in the answer prose. The visible Google "sources panel" is on
 a *partial* view of the retrieval set, so a domain cited in the prose but absent
 from the panel is still recorded as a source — which is exactly why the funnel
 holds and `n_cited` can never exceed `n_in_sources`.
+
+> **Scope note (multi-engine).** This metric model — and especially
+> `overview_present` as the **denominator gate** — is specified against **Google
+> AI Overview**, where an overview may legitimately not render. The rest of the
+> contract is **engine-agnostic** (`engine` is an open id; the funnel and the
+> `sources` / `citations` shapes apply to any answer engine). Extending capture to
+> other engines (ChatGPT, Gemini, Claude, Perplexity, Yandex, DeepSeek, …) is a
+> **backlog item — ROADMAP Feature 3**. For always-answering chat assistants the
+> top-of-funnel gate is expected to be **reinterpreted** (e.g. "a grounded /
+> sourced answer rendered" rather than "an overview rendered"); until that lands,
+> the definitions below describe the Google surface.
 
 | metric | formula | guard |
 |---|---|---|
@@ -338,7 +355,7 @@ from pipeline.schema import QueryCapture, normalize_domain
 conn = get_conn("data/aeo.db")
 init_db(conn)
 brand_id = get_or_create_brand(conn, "Acme", "https://www.acme.com")  # -> stores "acme.com"
-run_id = create_run(conn, brand_id, "google_ai_overview")
+run_id = create_run(conn, brand_id, "google")
 
 cap = QueryCapture.model_validate_json(some_json_string)  # raises ValidationError on bad input
 ```

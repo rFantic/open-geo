@@ -1,17 +1,53 @@
-[English](README.md) · [Русский](README.ru.md)
+<p align="center">
+  <img src="assets/cover.svg" alt="open-geo — GEO visibility tracker: the /open-geo Claude Code command over a dark panel, beside a visibility funnel from queries to AI Overview to sources to citations" width="100%">
+</p>
 
-# open-geo
+<p align="center"><a href="README.md">English</a> · <a href="README.ru.md">Русский</a></p>
 
-**open-geo** is a **GEO (Generative Engine Optimization)** tool: it measures **how visible
-your brand is inside AI answers**. Search is shifting from "ten blue links" to a generated
-answer — Google's AI Overview, and the other assistants people now ask first. That answer
-leans on a small set of sources. The question open-geo answers is: **does your domain make
-it into those answers — into the sources, into the citations, into the text — and how is the
-brand spoken about when it does.**
+# open-geo — GEO Visibility Tracker for Claude Code
 
-Unlike classic SEO (where a link ranks in a list), here the answer is *generated*, the
-sources are few, and being one of them **is** "visibility in AI." If your domain isn't
-cited, you are invisible.
+**open-geo measures how visible your brand is _inside_ AI answers.** Search is shifting from
+"ten blue links" to a generated answer — Google's AI Overview first — and that answer leans on a
+few sources. Being one of them **is** visibility in AI. open-geo runs your queries through the
+engine in a real, logged-in browser and records whether your domain makes it into the
+**sources**, into the **citations**, into the **text** — and how the brand is spoken about when
+it does.
+
+[![CI](https://github.com/Pupok462/open-geo/actions/workflows/ci.yml/badge.svg)](https://github.com/Pupok462/open-geo/actions/workflows/ci.yml)
+[![Claude Code skill](https://img.shields.io/badge/Claude%20Code-skill-7C5CFF)](https://claude.ai/code)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-858%20py%20%2B%20358%20web-2ea44f)](#testing--ci)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-early%20%C2%B7%20v0.1-orange)](ROADMAP.md)
+
+> **Scope today — read this first.** open-geo captures **Google AI Overview only**, and capture is
+> **visible and effectively manual**: it drives a real, logged-in Chrome via Claude-in-Chrome, not
+> a headless scraper. Multi-engine capture (ChatGPT, Perplexity, Gemini, Yandex …) is the **top of
+> the [roadmap](ROADMAP.md)**, not a shipped feature. The pipeline, metrics, dashboard and PDF are
+> production-grade (858 + 358 tests, CI-gated); the live capture is early. Full list in
+> [Caveats](#caveats-honest).
+
+### Why open-geo
+
+- **It reads the answer like a human, not an API.** Capture runs through Claude-in-Chrome in a
+  real, logged-in browser — it sees the _rendered_ AI Overview (the sources panel and the inline
+  citation chips), normalizes domains, and emits one validated record per query. No brittle
+  scraping of a surface Google never promised to keep stable.
+- **A visibility funnel, not a vanity score.** Six metrics that nest as a funnel — overview →
+  sources → citations — plus a free-text sentiment note. **No composite index, no made-up
+  share-of-voice.** Every number is auditable to [`pipeline/INTERFACES.md`](pipeline/INTERFACES.md).
+- **Local-first, multi-brand time-series.** Captures land in a local SQLite (WAL) database, so you
+  build per-brand, per-engine history and run-over-run deltas. Deliverables are a themed **PDF** and
+  a **FastAPI + React dashboard** with an **EN/RU** switcher. Your data never leaves your machine.
+
+### Who this is for
+
+- **GEO / SEO consultants** — walk into a pitch with a real, _dated_ read of a brand's Google
+  AI-Overview visibility instead of "AI search matters, trust me."
+- **In-house growth / SEO at a brand** — track your own domain's AI-Overview presence over time,
+  split by query lens (general / branded / comparative), and catch week-over-week drift.
+- **Founders & devs already in Claude Code** — it's just a skill: point `/open-geo` at a CSV and a
+  domain, get a dashboard. No SaaS, no upload, no account.
 
 ## What you get
 
@@ -28,9 +64,51 @@ cited, you are invisible.
 - **A PDF report** (`--lang en|ru`) — a self-contained themed A4 report (ReportLab +
   matplotlib), no headless Chrome and no system libraries required.
 
-> Two further features live in the backlog and are **not implemented** (SEO-question
-> harvesting → natural LLM prompts; a domain GEO-audit gate). Specs are in
-> [ROADMAP.md](ROADMAP.md).
+> Three further features live in the backlog and are **not implemented**: tracking the
+> **other popular AI answer engines** (ChatGPT, Perplexity, Gemini, Claude, Yandex, DeepSeek,
+> …) beyond Google AI Overview; SEO-question harvesting → natural LLM prompts; and a domain
+> GEO-audit gate. Specs are in [ROADMAP.md](ROADMAP.md).
+
+## Quick start
+
+**Install as a Claude Code plugin** (Claude Code 1.0.33+):
+
+```bash
+/plugin marketplace add Pupok462/open-geo
+/plugin install open-geo@open-geo-marketplace
+```
+
+**See it on demo data first — no browser, no capture:**
+
+```bash
+bash scripts/setup.sh                            # venv + Python deps + npm install
+.venv/bin/python -m pipeline.seed_demo --reset   # synthetic multi-run dataset
+```
+
+…then open the [dashboard](#dashboard) or render a [PDF](#pdf-report).
+
+**Track a real domain** (inside Claude Code, with Chrome logged in to the target market):
+
+```bash
+/open-geo examples/questions.csv google acme.com --brand "Acme" --n-worker 3 --output both
+```
+
+## Commands
+
+open-geo is one operator command — the **`/open-geo`** skill — backed by a small, scriptable
+CLI (run the Python entry points with the project venv, `.venv/bin/python`). Authoritative
+contracts: [`.claude/skills/open-geo/SKILL.md`](.claude/skills/open-geo/SKILL.md) and
+[`pipeline/INTERFACES.md`](pipeline/INTERFACES.md).
+
+| Command | What it does |
+|---|---|
+| `/open-geo <csv> <engine> <domain> --brand "<name>" --n-worker <N> [--output dashboard\|pdf\|both] [--period today\|all] [--lang en\|ru]` | Operator entry point: capture → ingest → aggregate → emit a dashboard and/or PDF, then a short summary. |
+| `python -m pipeline.seed_demo --reset` | Seed a synthetic multi-run dataset to explore the dashboard and report without a live capture. |
+| `python -m report.generate --brand "<name>" --domain <domain> --engine <engine> [--period today\|all] [--lang en\|ru] --out reports/<name>.pdf` | Render the themed A4 PDF report (ReportLab + matplotlib). |
+| `python -m uvicorn dashboard.api:app --host 127.0.0.1 --port 8077` | Start the read-only dashboard API; pair with `npm run dev` in `dashboard/web` (see [Dashboard](#dashboard)). |
+
+> Capture itself is not a separate command — it's the per-engine playbook
+> [`engines/google.md`](engines/google.md) that the `/open-geo` skill drives via Claude-in-Chrome.
 
 ## How it works
 
@@ -43,11 +121,14 @@ The whole tracker is orchestrated by the **`/open-geo`** command:
    `QueryCapture` object per query**.
 2. **`QueryCapture`** — the validated capture contract (Pydantic v2; authoritative spec in
    [`pipeline/INTERFACES.md`](pipeline/INTERFACES.md)).
-3. **ingest / aggregate** — captures are validated and written to SQLite
-   (`pipeline.ingest`), then metrics are computed per lens plus an `all` row
-   (`pipeline.aggregate`).
-4. **dashboard / PDF** — the deliverable(s) are produced from the stored metrics, plus a
-   short summary.
+3. **ingest / aggregate** — the workers are **capture-only**: each builds and self-validates
+   its `QueryCapture` objects (read-only) and **returns** them to the orchestrator. The
+   **orchestrator (the skill)** collects all returned objects, does **one central ingest**
+   (`pipeline.ingest`), **finalizes** the run, then computes metrics per lens plus an `all`
+   row (`pipeline.aggregate`).
+4. **dashboard / PDF** — the orchestrator emits the deliverable(s) **last**, from the stored
+   metrics, plus a short summary (the dashboard server is started by the skill in the
+   background, only after all captures are in).
 
 ## Metrics
 
@@ -85,6 +166,51 @@ There is intentionally **no competitors, no share-of-voice, and no composite ind
 previous completed run of the same brand + engine; they are not stored
 (`pipeline/INTERFACES.md` §4.1).
 
+## Sample output
+
+Every run produces two deliverables — a themed **PDF report** and a local **dashboard**. Below
+is the PDF cover from the seeded **Acme** demo dataset
+([download the full sample PDF](assets/sample-report-acme.pdf)):
+
+<p align="center">
+  <img src="assets/report-cover.png" alt="open-geo PDF report cover — AI Visibility Report for Acme (acme.com), engine google_ai_overview, whole history" width="60%">
+</p>
+
+At the end of a run, `/open-geo` prints a short headline summary built from the `lens="all"`
+row (here, the seeded Acme demo — engine `google_ai_overview`, run of 2026-06-09, `--lang en`):
+
+```
+Run for brand "Acme" (engine google_ai_overview), queries: 24.
+• AI Overview coverage: 79% (19 of 24 queries).
+• Visibility in sources: 47% of overview queries.
+• Visibility in citations: 37% of overview queries.
+• Average source position: 2.6 (lower is better).
+• Average citation position: 1.0 (lower is better).
+• Source→citation conversion (relative citation): 78% (higher is better).
+Report: reports/acme_2026-06-09.pdf · Dashboard: http://localhost:5173
+```
+
+The six metrics for `lens="all"`, with the underlying funnel counts
+(`n_queries = 24` → `n_overviews = 19` → `n_in_sources = 9` → `n_cited = 7`):
+
+| Metric | Value | Plain meaning | Direction |
+|---|---|---|---|
+| `overview_coverage` | **0.79** (19/24) | Share of queries where an AI Overview rendered at all | higher = better |
+| `visibility_in_sources` | **0.47** (9/19) | Of overview queries, share where `acme.com` made it into the relied-on `sources` | higher = better |
+| `visibility_in_citations` | **0.37** (7/19) | Of overview queries, share where the domain is cited in the answer prose | higher = better |
+| `avg_source_position` | **2.56** | Average best (`min`) rank among sources, over queries where it appears | lower = better |
+| `avg_citation_position` | **1.00** | Average best (`min`) rank among citations, over queries where it is cited | lower = better |
+| `relative_citation` | **0.78** (7/9) | Source→citation conversion (last funnel step, ∈ `[0, 1]`) | higher = better |
+
+A value renders as `—` (not `0`) when its guard trips — e.g. for the `comparative` lens in this
+run the domain never reached `sources`, so `avg_source_position`, `avg_citation_position` and
+`relative_citation` are all `—`.
+
+> Deltas are shown against the **previous completed run** of the same brand + engine, computed at
+> read-time (not stored). Versus the prior run here, `visibility_in_sources` (0.21 → 0.47),
+> `visibility_in_citations` (0.05 → 0.37) and `relative_citation` (0.25 → 0.78) all rose, while
+> `avg_source_position` drifted 2.0 → 2.56 (slightly worse, since lower is better).
+
 ## Prerequisites
 
 - **Python 3.11** — pipeline, report, and the dashboard backend (a `.venv` from
@@ -120,7 +246,7 @@ A common way to use open-geo is to hand it to Claude in a fresh chat. Tell Claud
 like:
 
 > Clone `<repo>`, run `bash scripts/setup.sh`, then use the `/open-geo` skill to track my
-> domain `acme.com` (brand "Acme") against `examples/questions.csv` on `google_ai_overview`.
+> domain `acme.com` (brand "Acme") against `examples/questions.csv` on `google`.
 
 Claude clones the repo, runs the setup script, and the `/open-geo` skill becomes available as
 the operator entry point. Make sure the Claude-in-Chrome extension is connected and the
@@ -138,18 +264,20 @@ browser is logged in first — that is the one thing Claude cannot do for you.
 | argument | meaning |
 |---|---|
 | `<questions.csv>` | CSV with columns **`query,lens`**, where `lens ∈ general \| branded \| comparative`. Ready sample: `examples/questions.csv`. |
-| `<engine>` | engine id, snake_case, e.g. `google_ai_overview`. Written into every `QueryCapture` and selects the capture playbook `engines/<engine>.md`. |
+| `<engine>` | engine id; equals the capture playbook's basename, e.g. `google` ↔ `engines/google.md`. Written into every `QueryCapture` and selects the capture playbook `engines/<engine>.md`. |
 | `<domain>` | the target domain (any spelling: `https://www.acme.com`, `acme.com` — normalized automatically). |
 | `--brand "<name>"` | human brand name (used in report/dashboard titles and the summary). |
-| `--n-worker <N>` | number of capture workers. **Keep modest (1–3)** — see the caveat below. |
+| `--n-worker <N>` | number of capture workers run **in parallel** — the run's concurrency. |
 | `--output` | `dashboard` (default) \| `pdf` \| `both`. |
 | `--period` | `all` (default — full brand+engine history, enables deltas) \| `today` (this run only). |
 | `--lang` | `en` (default) \| `ru` — UI language for the deliverables: the PDF report language and the dashboard's default language. |
 
-Step by step the command: creates a run → splits the queries across workers, each of which
-drives the engine via the playbook and sends a batch of `QueryCapture` objects to
-`pipeline.ingest` → finalizes the run → computes metrics (`pipeline.aggregate`) → produces the
-dashboard and/or PDF → prints a short summary from the `lens="all"` row. Details in
+Step by step the command: creates a run → splits the queries across **capture-only** workers,
+each of which drives the engine via the playbook and **captures and returns** its
+`QueryCapture` objects (the workers never ingest or touch the DB) → the skill **ingests the
+collected batch centrally** (`pipeline.ingest`) → finalizes the run → computes metrics
+(`pipeline.aggregate`) → emits the dashboard and/or PDF **last** → prints a short summary from
+the `lens="all"` row. Details in
 [`.claude/skills/open-geo/SKILL.md`](.claude/skills/open-geo/SKILL.md).
 
 > **Step 0 (pre-gate) is a no-op.** The command reserves a slot for a future domain
@@ -171,7 +299,7 @@ multiple positions; a zero-visibility lens to exercise the guards).
 
 ```bash
 .venv/bin/python -m report.generate \
-  --brand "Acme" --domain acme.com --engine google_ai_overview \
+  --brand "Acme" --domain acme.com --engine google \
   --period all --lang en --out reports/acme.pdf
 ```
 
@@ -233,6 +361,7 @@ open-geo/
 │   ├── seed_demo.py         #   CLI: synthetic demo data
 │   └── INTERFACES.md        #   authoritative contract (fields, DB, formulas)
 ├── engines/
+│   ├── README.md            # capture-playbook pattern + how to add an engine (multi-engine)
 │   └── google.md            # Google AI Overview capture playbook (Claude-in-Chrome)
 ├── report/
 │   ├── generate.py          # themed PDF (ReportLab + matplotlib), --lang en|ru
@@ -289,18 +418,94 @@ artifacts, and **fails the build if coverage drops below 95%**.
 - **Capture is visible and effectively manual per session** — it runs through a **logged-in**
   Chrome (Claude-in-Chrome). The session is left untouched (no incognito/logout/account
   switch), since AI Overview depends on the account and locale.
-- **Google AI Overview only, for now**, and the **AI Overview surface is non-deterministic**:
+- **Google AI Overview only, for now** — tracking the other AI answer engines (ChatGPT,
+  Perplexity, Gemini, Claude, Yandex, DeepSeek, …) is on the roadmap (ROADMAP Feature 3). The
+  pipeline is already engine-agnostic, so each new engine is mainly a new
+  `engines/<engine>.md` playbook plus a little per-engine modeling — see
+  [`engines/README.md`](engines/README.md). The **AI Overview surface is non-deterministic**:
   the same query can return a different overview or none at all. open-geo captures what
   rendered *right now* and does not retry hoping for a "better" overview. Absence is **valid
   data** (`overview_present=false`) that feeds coverage — not a failure.
-- **`--n-worker` is best-effort throughput on a single browser**, not guaranteed parallel
-  browsers: there is effectively one visible Chrome session, so workers contend for one
-  window. Keep it modest (1–3).
+- **`--n-worker` workers run in parallel.** The queries are split into N chunks and the N
+  capture sub-agents run concurrently, each in its own browser tab/context; `--n-worker` is
+  the run's concurrency.
 - **reCAPTCHA / "unusual traffic" risk** under load: on a challenge, capture **stops** and
   asks the human to solve it in the open Chrome window rather than hammering Google.
 - **ToS gray area** — automating a search engine sits in a gray area of its terms of service.
   Use a **dedicated account**, keep volume low, and treat this as a measurement tool, not a
   scraper.
+
+## FAQ
+
+### Which AI engines does open-geo support?
+**Google AI Overview only, today.** That is the one shipped capture playbook (`engines/google.md`).
+The other popular AI answer engines — ChatGPT, Perplexity, Gemini, Claude, Yandex (Neuro),
+DeepSeek — are on the [roadmap](ROADMAP.md) (Feature 3), not shipped. The pipeline is already
+engine-agnostic (the `engine` field is an open string everywhere), so adding one is mainly a new
+`engines/<engine>.md` playbook plus a little per-engine modeling — but until that playbook exists,
+passing another engine id will stop the run.
+
+### Is capture headless? Can it run unattended?
+No. Capture drives a **visible, logged-in Chrome** through Claude-in-Chrome — not a headless
+scraper. AI Overview depends on who is logged in and on the locale, so the session is left
+untouched (no incognito, no logout, no account switch). It is also not a retry-until-better loop:
+the AI Overview surface is non-deterministic, and the **absence** of an overview is valid data
+(`overview_present=false`) that feeds `overview_coverage` — open-geo records what rendered right
+now rather than re-querying hoping for a "better" answer.
+
+### Does my data leave my machine?
+No. Every run is stored in a local **SQLite (WAL) database** at `data/aeo.db`, and the deliverables
+are a **local PDF** and a **local dashboard** (a read-only FastAPI API plus a Vite/React frontend
+you run yourself). There is no SaaS, no upload, and no account.
+
+### What are the six metrics, and why is there no single score?
+They form a **funnel**: `overview_coverage` (an overview rendered), then for the target domain
+`visibility_in_sources` and `visibility_in_citations` (rates), `avg_source_position` and
+`avg_citation_position` (best-rank averages, lower is better), and `relative_citation` (the
+source→citation conversion). The counts nest as `n_cited ≤ n_in_sources ≤ n_overviews ≤ n_queries`.
+There is deliberately **no composite index, no competitors, and no share-of-voice** — those invite
+hand-wavy weighting and invented baselines. Every number is auditable to one formula in
+[`pipeline/INTERFACES.md`](pipeline/INTERFACES.md) §4, plus a free-text sentiment note that is
+never reduced to a number.
+
+### What is `relative_citation`, and why are citations a subset of sources?
+A model can only cite what it actually retrieved, so **citations ⊆ sources**. During capture, any
+inline-cited link is folded into `sources` (the visible Google "sources panel" is only a partial
+view of the retrieval set). `relative_citation = n_cited / n_in_sources` is therefore the **last
+step of the funnel** — of the queries where your domain was retrieved into `sources`, the share
+where the model went on to cite it in the prose. Because citations are a subset of sources the
+ratio is bounded to `[0, 1]`, and higher is better.
+
+### Is automating Google against its Terms of Service?
+It sits in a **gray area** of search-engine terms of service. Treat open-geo as a measurement
+tool, not a scraper: use a **dedicated account**, keep volume low, and don't hammer the engine. If
+Google shows a reCAPTCHA or an "unusual traffic" challenge, capture **stops** and asks the human to
+solve it in the open Chrome window — it never tries to solve the challenge, retry in a loop, or
+spin up fresh tabs to get around it.
+
+### What input do I need?
+A **CSV with two columns, `query,lens`**, where `lens ∈ general | branded | comparative` (`general`
+= neutral query with no brand named; `branded` = brand explicitly named; `comparative` = brand vs
+alternatives). A ready sample ships at [`examples/questions.csv`](examples/questions.csv).
+
+### Do I need any paid API keys?
+No external data API and no paid keys. You need **Claude Code**, the **Claude-in-Chrome** extension
+connected, and a **browser already logged in** to the Google account / market you want to track.
+(Python 3.11 for the pipeline / report / API, Node 20+ only for the dashboard frontend.)
+
+### What languages are supported?
+The UI chrome — the dashboard and the PDF report — ships in **English and Russian** and is
+extensible: drop an `i18n/<code>.json` file and it appears in the dashboard switcher and works via
+`report --lang <code>` (missing keys fall back to English). Only the interface is translated;
+**captured data** (query text, sentiment, domains, brand names) is shown as-is. UI language is
+independent of the capture market.
+
+### What is `--n-worker`, and how long does a run take?
+`--n-worker N` is the run's **concurrency**: the queries are split into N chunks and N capture
+sub-agents run **in parallel**, each in its own browser tab/context. A single-query capture is
+roughly 6–10 tool calls with no navigation away from Google, so wall-clock time scales with how
+many queries each worker handles in sequence — raise `--n-worker` to shorten a large run (within
+reason, to stay under Google's "unusual traffic" radar).
 
 ## License
 

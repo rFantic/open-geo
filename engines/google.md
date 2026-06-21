@@ -25,10 +25,14 @@
 - **target brand `name`** — e.g. `Acme` (for `brand_in_answer_text`).
 - **target `domain`** — e.g. `acme.com` or `https://www.acme.com` (you will
   normalize it; see step 5).
-- `run_id` — for the screenshot path (`data/screenshots/<run_id>/<n>.png`).
-- `n` — the index of this query within the run (for the screenshot filename).
 
-`engine` is always the literal `"google_ai_overview"`.
+`engine` — the engine id the orchestrator passes you, **copied through verbatim**. For
+this playbook that is **`google`** (it matches this file's basename, `engines/google.md`).
+Do **not** substitute `google_ai_overview` or any other string.
+
+> You **return** your finished `QueryCapture` object to the orchestrator — you do **not**
+> ingest it, **not** create runs, **not** write to the DB, and **not** start any server (so
+> you are not given a `run_id` or DB path). The orchestrator owns all of that.
 
 > **Locale knobs (target market ≠ UI language).** The search URL's **`hl`**
 > (interface language) and **`gl`** (country) set the **TARGET MARKET** — *which
@@ -85,8 +89,11 @@
 >   wasteful and trips their own CAPTCHAs (e.g. an agent landed on a review site's "Are
 >   you a robot?" block; runs ballooned to 40–65 tool calls / ~12 min). A correct capture
 >   is **~6–10 tool calls with ZERO navigation away from Google.** If a click accidentally
->   leaves Google, **go back** and re-read via `read_page` — do not proceed on the source
->   site.
+>   leaves Google or pops a new tab to a source site, **close that tab / go back
+>   immediately** and re-read via `read_page` — never proceed on, read, or "study" a source
+>   site. **Collect every URL by reading its `href` in place;** opening a source URL is a
+>   last-resort fallback only if a URL genuinely cannot be read in place (it almost never
+>   can't).
 > - **Click only the `button` form, never the `link` form.** In the interactive tree each
 >   item exposes **two** forms: a **`link`** that *navigates to the source site* and a
 >   **`button`** that *expands in place*. Click **only `button`s** — the **"N sites"** (RU:
@@ -145,7 +152,8 @@ Three distinct states:
   - `answer_text_md = null`
   - `brand_in_answer_text = false`
   - `sentiment = null`
-  - (Still capture a screenshot and fill `query`/`lens`/`engine`/`captured_at`.)
+  - (Still note state (a): fill `query`/`lens`/`engine`/`captured_at`; `screenshot_path`
+    stays `null`.)
 - **(b) Overview rendered, target ABSENT.** An AI Overview block is present, but
   the target domain/brand appears **nowhere** (not in prose, not in any source
   or citation link). Set `overview_present = true`, fill `answer_text_md` +
@@ -298,24 +306,22 @@ Three distinct states:
   `sources`, not in `citations`). If it appeared **anywhere**, write a non-null
   phrase. (Equivalently: `sentiment` is non-null exactly in state (c).)
 
-### 9. Capture a full-page screenshot → `screenshot_path`
-- Take a **full-page** screenshot (whole overview + the sources/citations you
-  expanded, ideally) and save it under
-  **`data/screenshots/<run_id>/<n>.png`** (zero-pad `n` if the orchestrator
-  does, e.g. `0003.png`). Create the directory if needed.
-- Set `screenshot_path` to that **repo-root-relative** path. If the tool only
-  returns image bytes, still write them to that path and record it. `null` only
-  if a screenshot genuinely could not be taken.
+### 9. Screenshots are transient — do **not** persist; set `screenshot_path = null`
+- You **do** take screenshots to **detect and read** the overview (required —
+  `get_page_text` drops the AI block). But v1 does **not** save them as artifacts.
+- Set **`screenshot_path = null`** in your object. Do **not** write any file under
+  `data/screenshots/...`.
 
-### 10. Emit exactly ONE `QueryCapture` JSON object
-- Output **a single JSON object** matching `pipeline/INTERFACES.md` §1
-  byte-for-byte in shape (see the worked example below). **No array, no prose,
-  no Markdown fence around it** — just the object, so the orchestrator can parse
-  it directly.
-- `captured_at` = **now in UTC, ISO-8601** (e.g. `"2026-06-19T20:15:30Z"`).
-- Double-check the §1.2 invariants before emitting (ranks 1-based & ascending;
-  empty arrays when `overview_present=false`; `sentiment` null-iff-absent;
-  domains normalized).
+### 10. RETURN exactly ONE `QueryCapture` JSON object to the orchestrator
+- Produce **a single JSON object** matching `pipeline/INTERFACES.md` §1 in shape (see the
+  worked example below) and **return it to the orchestrator** — it collects all objects and
+  ingests them. **Do NOT run `pipeline.ingest`, do NOT create runs, do NOT write to the
+  DB.** You may **read** `pipeline/schema.py` to self-validate first.
+- `captured_at` = **now in UTC, ISO-8601** (e.g. `"2026-06-19T20:15:30Z"`); `screenshot_path
+  = null`.
+- Double-check the §1.2 invariants before returning (ranks 1-based & ascending; empty arrays
+  when `overview_present=false`; `sentiment` null-iff-absent; domains normalized; citations
+  ⊆ sources).
 
 ---
 
@@ -350,8 +356,8 @@ Three distinct states:
 
 **Inputs:** `query = "best mattress for back sleepers"`, `lens = "general"`,
 brand `name = "Acme"`, target `domain = "https://www.acme.com"` (→ normalizes to
-`acme.com`), `run_id = 42`, `n = 3`. Market: `hl=en&gl=us` (English/US — set
-`hl`/`gl` to whichever market you track).
+`acme.com`). Market: `hl=en&gl=us` (English/US — set `hl`/`gl` to whichever market you
+track).
 
 An AI Overview rendered. After expanding the sources panel ("Show all") and the
 inline "Acme" citation chip, the target domain appeared at **source positions 2
@@ -362,10 +368,10 @@ Resulting single object:
 {
   "query": "best mattress for back sleepers",
   "lens": "general",
-  "engine": "google_ai_overview",
+  "engine": "google",
   "captured_at": "2026-06-19T20:15:30Z",
   "answer_text_md": "For back sleepers, experts often recommend a medium-firm mattress with good lumbar support. **Acme** offers several models suited to this...",
-  "screenshot_path": "data/screenshots/42/0003.png",
+  "screenshot_path": null,
   "overview_present": true,
   "sources": [
     { "rank": 1, "url": "https://www.sleepfoundation.org/best-mattress", "domain": "sleepfoundation.org" },
@@ -390,4 +396,4 @@ Resulting single object:
 >   `sentiment: null`.
 > - **State (a), no overview:** `overview_present: false`, `answer_text_md:
 >   null`, `sources: []`, `citations: []`, both rank arrays `[]`,
->   `brand_in_answer_text: false`, `sentiment: null` (screenshot still taken).
+>   `brand_in_answer_text: false`, `sentiment: null` (`screenshot_path` stays `null`).

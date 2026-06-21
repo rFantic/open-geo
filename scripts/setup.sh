@@ -73,7 +73,7 @@ Next steps:
          - Chrome is open and logged in to the target engine (e.g. Google).
 
   4. Run a visibility tracking pass (inside Claude Code):
-       /open-geo examples/questions.csv google_ai_overview acme.com \\
+       /open-geo examples/questions.csv google acme.com \\
            --brand "Acme" --n-worker 3 --output both
        (Generated PDFs land in reports/ ; the local DB is data/aeo.db.)
 

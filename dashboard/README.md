@@ -3,6 +3,10 @@
 FastAPI backend (read-only over `data/aeo.db`) + Vite/React/TypeScript/Tailwind/Recharts
 frontend. Shows AI-visibility metrics per brand/engine with retrospective charts,
 read-time deltas, lens breakdown, a per-query results table, and a PDF export. The
+brand/engine selectors are **data-driven** — the engine list is whatever has runs in the DB
+(`/api/engines`), so as capture expands beyond Google AI Overview (ROADMAP Feature 3) new
+engines surface automatically with no dashboard change (the Google-flavored metric *labels*
+in `i18n/` are the one thing Feature 3 may revisit). The
 React UI has light & dark themes (toggle, system-aware), an **EN/RU language switcher**
 (extensible — driven by `i18n/`, see below), and per-metric `(i)` tooltips carrying the
 §4 definitions; it lives in `web/src/redesign/` as a self-contained, dependency-free
@@ -120,7 +124,7 @@ VITE_API_BASE=http://127.0.0.1:8077 npm run build
 OPEN_GEO_DB=data/_fixture_dash.db .venv/bin/python -m uvicorn dashboard.api:app \
     --host 127.0.0.1 --port 8077
 
-# 3. Probe it:
+# 3. Probe it (the fixture seeds engine `google_ai_overview`, not the live `google`):
 curl -s 'http://127.0.0.1:8077/api/brands'
 curl -s 'http://127.0.0.1:8077/api/metrics?brand_id=1&engine=google_ai_overview&period=today'
 curl -s 'http://127.0.0.1:8077/api/i18n'

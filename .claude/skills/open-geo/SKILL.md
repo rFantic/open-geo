@@ -1,6 +1,14 @@
 ---
 name: open-geo
-description: Run a list of queries through a chosen AI engine, measure the target domain's visibility/citation in the AI answers, and produce a dashboard or PDF report.
+description: Run a list of queries through a chosen AI engine, measure the target domain's visibility/citation in the AI answers, and produce a dashboard or PDF report. Use when the user runs /open-geo or asks to measure a brand's GEO / AI-search visibility (citations in Google AI Overview, etc.).
+argument-hint: "<questions.csv> <engine> <domain> --brand <name> --n-worker <N> [--output dashboard|pdf|both] [--period today|all] [--lang en|ru]"
+disable-model-invocation: true
+allowed-tools: Read, Write, Bash(.venv/bin/python:*), Bash(npm:*), Bash(uvicorn:*), Bash(mktemp:*), Task, AskUserQuestion
+# Orchestrator-only tools. STEP A uses AskUserQuestion for the parameter wizard; Task spawns the
+# N capture sub-agents (STEP 3). Browser capture tools (mcp__Claude_in_Chrome__*) live on the
+# capture-worker subagent (.claude/agents/capture-worker.md) — the orchestrator never drives Chrome.
+# disable-model-invocation: this run opens a real logged-in Chrome, writes data/aeo.db and spawns N
+# parallel workers, so it is /open-geo-ONLY (no auto-invoke).
 ---
 
 # open-geo — GEO visibility run orchestrator
@@ -36,7 +44,7 @@ ambiguous — the shapes there win over this prose.
 | arg | meaning |
 |---|---|
 | `<questions.csv>` | Path to the input CSV. Columns: **`query,lens`** where `lens ∈ general \| branded \| comparative`. See `examples/questions.csv` for a ready sample. `general` = neutral query, no brand named; `branded` = brand explicitly named; `comparative` = brand vs alternatives. |
-| `<engine>` | Engine id, **snake_case**, e.g. `google_ai_overview`. This value is (a) the `engine` field written into every `QueryCapture` and the run, and (b) the basename of the capture playbook the workers load: `engines/<engine>.md`. |
+| `<engine>` | Engine id, **snake_case**, e.g. `google`. This value is (a) the `engine` field written into every `QueryCapture` and the run, and (b) the basename of the capture playbook the workers load: `engines/<engine>.md` (so `google` ↔ `engines/google.md`). **This is the multi-engine extension point** — `google` (Google AI Overview) is the only playbook shipping today; the others (ChatGPT, Perplexity, Gemini, Claude, Yandex, DeepSeek, …) are on the roadmap (ROADMAP Feature 3), and adding one is mainly authoring `engines/<engine>.md` (see `engines/README.md`). |
 | `<domain>` | The **target** domain to score. Accept any spelling (`https://www.acme.com`, `acme.com`); the pipeline normalizes it via `pipeline.schema.normalize_domain`. Workers match the target with this same normalizer so matching is consistent. |
 
 ### Flags
@@ -44,14 +52,47 @@ ambiguous — the shapes there win over this prose.
 | flag | required | default | meaning |
 |---|---|---|---|
 | `--brand "<name>"` | yes | — | Human brand name (free text, may contain spaces — keep it quoted). Stored on the run; used in report/dashboard titles and the summary. |
-| `--n-worker <N>` | yes | — | Number of capture subagents to fan out across. **Keep modest (1–3)** — see the parallelism caveat in step 4. |
+| `--n-worker <N>` | yes | — | Number of capture sub-agents to run **in parallel** — the run's concurrency. Step 2 splits the queries into N chunks, one per worker. |
 | `--output dashboard\|pdf\|both` | no | `dashboard` | Which deliverable(s) to produce in step 6. |
 | `--period today\|all` | no | `all` | Reporting window passed to the dashboard/report: `today` = just this run's date, `all` = full history for this brand+engine (enables the previous-run deltas described in INTERFACES §4.1). |
 | `--lang en\|ru` | no | `en` | UI language for the deliverables: it is passed to the report (`report.generate --lang`) and is the dashboard's **default** language (the switcher can still change it in the browser). Extensible to any code registered in `i18n/locales.json`. It also sets the language of the **final summary** you print in step 7. |
 
-If a required argument is missing or `questions.csv` does not exist / has no data rows,
-**stop immediately** and print a short error (in `--lang`) explaining what is missing
-(do not create an empty run).
+If a required argument is missing, go to **STEP A** (the parameter wizard) to collect it
+interactively. Only hard-stop — a short error (in `--lang`), no empty run — if a required value
+is still unresolved after the wizard (or the user abandons it), or if `questions.csv` does not
+exist / has no data rows.
+
+---
+
+## STEP A — RESOLVE PARAMETERS (intro + wizard, with fast-path bypass)
+
+Run this **first**, before STEP 0. Goal: end up with every required parameter resolved.
+
+**Required:** `questions.csv`, `engine`, `domain`, `--brand`, `--n-worker`.
+**Optional (defaults):** `--output` (`dashboard`), `--period` (`all`), `--lang` (`en`).
+
+1. **Parse the invocation** — gather values from positional args, flags, AND anything the user
+   expressed in free text (e.g. "measure acme.com on google, 5 workers, pdf").
+2. **FAST PATH — all required resolved:** do **not** print the intro or ask anything. Echo one
+   confirmation line — `Running: csv=… engine=… domain=… brand=… n-worker=… output=… period=… lang=…` —
+   then proceed to STEP 0/1. (This is the path loops/headless use: pass full args, skip the wizard.)
+3. **GUIDED PATH — something required is missing:**
+   a. Print a short intro (2–4 lines): what open-geo does (drives queries through an AI engine,
+      measures the target domain's visibility/citation, emits a dashboard and/or PDF) and what it
+      produces.
+   b. Ask **only for the missing** parameters, using `AskUserQuestion` for the enumerable ones:
+      - `engine` — offer only engines that actually have a playbook:
+        `.venv/bin/python -c "import glob,os; print('\n'.join(sorted(os.path.basename(p)[:-3] for p in glob.glob('engines/*.md') if os.path.basename(p)!='README.md')))"`
+        (today: `google`). If the user names an engine without a playbook, say it is not available
+        yet (ROADMAP Feature 3) and stop.
+      - `--n-worker` — presets `1 / 3 / 5 / 10` (+ custom).
+      - `--output` — `dashboard / pdf / both`. `--period` — `today / all`. `--lang` — `en / ru`.
+      - `questions.csv` — offer found CSVs (+ "other path"):
+        `.venv/bin/python -c "import glob; print('\n'.join(glob.glob('*.csv')+glob.glob('examples/*.csv')))"`
+      - `domain` and `--brand` — free text.
+   c. Echo the resolved parameters for a quick confirm, then proceed to STEP 0/1.
+4. If a required value is still unknown after the wizard (or it is abandoned), apply the guard from
+   INVOCATION: a short error in `--lang`, no empty run.
 
 ---
 
@@ -102,96 +143,86 @@ Create the brand (if new) and a fresh run, and capture the `run_id` from JSON st
    - If `engines/<engine>.md` is **missing**, do not invent a procedure. Stop and tell the
      user (in `--lang`) that the playbook for this engine is not present yet and must be
      added before a run — the capture contract still applies, but the engine-specific "how
-     to drive it" lives in that file. *(The `engines/` directory may be empty in early
-     iterations — this is the expected guard until a playbook is authored.)*
+     to drive it" lives in that file. The pattern for authoring a new engine playbook is in
+     `engines/README.md` (multi-engine is ROADMAP Feature 3). *(Only `engines/google.md`
+     ships today; passing any other engine id needs its playbook written first.)*
 3. Split `rows` into `min(N, len(rows))` contiguous chunks of roughly equal size, where
    `N = --n-worker`. Each chunk keeps its rows' original `(query, lens)` pairs.
 
 ---
 
-## STEP 3 — FAN-OUT CAPTURE (subagents via the Task/Agent tool)
+## STEP 3 — FAN-OUT CAPTURE (one `capture-worker` subagent per chunk)
 
-Spawn one capture **subagent per chunk** using the Task/Agent tool. Give each subagent a
+Spawn **N = `--n-worker`** subagents of type **`capture-worker`** (Task tool), one per chunk, and
+run them **in parallel** — each drives its chunk concurrently in its own browser tab/context. A
+capture worker's only job is to **capture and RETURN data**; it never ingests, creates runs, starts
+servers, or writes the DB. Its full step-by-step contract lives in
+`.claude/agents/capture-worker.md` — do not restate it here. Give each `capture-worker` a
 self-contained brief containing:
 
 - The **full text** of `engines/<engine>.md` (the capture playbook).
-- Its **chunk** of `(query, lens)` rows.
-- The **target `<domain>`** and **`--brand` name**, and the **`<engine>` id**.
-- The **`run_id`** from step 1.
+- Its **chunk** of `(query, lens)` rows, and its **chunk index** (1..N) — used to name its
+  validation temp file uniquely (`/tmp/open_geo_cap_<idx>.json`), since parallel workers share `/tmp`.
+- The **target `<domain>`**, the **`--brand` name**, and the **`<engine>` id**.
 - A pointer to **`pipeline/INTERFACES.md` §1** as the authoritative capture contract, and
   to `pipeline/schema.py :: QueryCapture` / `normalize_domain`.
 
-### What each subagent MUST do
+> Do **not** give the worker the `run_id`, the DB path, or any ingest command — a capture
+> worker never writes to the DB and never starts a server. The orchestrator owns all DB
+> writes and the deliverables (steps 4 and 6).
 
-1. For **every** `(query, lens)` in its chunk, drive the engine per the playbook and
-   produce **one `QueryCapture` JSON object** (INTERFACES §1.1). Required fields and the
-   rules that bite:
-   - `engine` = the `<engine>` id; `lens` = the row's lens; `captured_at` = UTC ISO-8601
-     (e.g. `2026-06-18T20:15:30Z`).
-   - `overview_present` is the **denominator gate**: set it truthfully. If no AI answer
-     rendered → `overview_present=false`, and then `sources=[]`, `citations=[]`, both rank
-     arrays `[]`, `answer_text_md=null`, `brand_in_answer_text=false`, `sentiment=null`.
-   - `sources` / `citations` are **ordered** `Link` lists (`rank` 1-based = array
-     position), **duplicate domains allowed**. Compute each `Link.domain` with
-     `normalize_domain(url)`.
-   - `target_source_ranks` / `target_citation_ranks` list **every** position where the
-     **normalized** target domain appears (ascending). `[]` if it never appears.
-   - `brand_in_answer_text` = was the **brand name** in the prose (independent of links).
-   - `sentiment` = one short qualitative phrase about how the answer treats the target —
-     **`null` iff the target appeared nowhere** (prose or links). It is free text, never a
-     number.
-   - Optionally save a screenshot to `data/screenshots/<run_id>/<n>.png` and set
-     `screenshot_path` (repo-root-relative).
-2. Assemble the chunk's objects into a **JSON array** and feed it to ingest **on STDIN**:
-   ```bash
-   .venv/bin/python -m pipeline.ingest --run-id <run_id>
-   ```
-   (the array is piped to stdin; see INTERFACES §3.2).
-3. Read ingest's stdout: `{"run_id", "ok": [...indices...], "errors": [{index, query, field, msg}, ...]}`.
-   Invalid rows do **not** abort the batch — they come back in `errors`.
-4. **Re-capture / fix** every row listed in `errors`: correct the offending `field` to
-   satisfy the contract (`msg` tells you what failed), then re-send **only the fixed
-   objects** as a new JSON array to the same `--run-id <run_id>` ingest call. Repeat until
-   `errors` is empty (or, after a small bounded number of retries, report the residual
-   failures upward rather than looping forever).
-5. Finish by returning to the orchestrator a tiny status: how many objects it captured,
-   how many `ok`, and any rows it could not get accepted.
+> The worker's full step-by-step contract — output fields, the no-DB and no-source-visit rules,
+> per-worker temp-file self-validation, what to return — lives in
+> `.claude/agents/capture-worker.md`. It is **engine-agnostic**; the injected `engines/<engine>.md`
+> playbook is authoritative for how to drive the specific engine, and `INTERFACES §1` for the
+> `QueryCapture` shape.
 
-### Parallelism caveat — STATE THIS PLAINLY
+### Parallelism — N workers run concurrently
 
-Capture drives **one visible, logged-in Chrome** (Claude-in-Chrome). There is effectively
-a single browser session, so **true parallelism is limited**: subagents contend for one
-window, and **Google may show a reCAPTCHA under load**. Therefore:
+The skill spawns **N = `--n-worker`** capture sub-agents and runs them **in parallel**:
+step 2 splits the query rows into N chunks and each sub-agent drives its chunk
+**concurrently**, each in its own browser tab/context. `--n-worker` IS the run's real
+concurrency — raise it to go wider.
 
-- Keep `--n-worker` **modest (1–3) for v1**.
-- Treat `--n-worker` as **best-effort throughput / work partitioning, NOT guaranteed
-  parallel browsers**. If contention or CAPTCHA appears, workers should serialize and slow
-  down rather than hammer the engine. This is a known v1 limitation, not a bug.
+- If Google shows a **reCAPTCHA / "unusual traffic"** challenge, the affected worker
+  **stops** and surfaces it to the human (per the playbook) instead of solving or hammering
+  it; the other workers keep going.
 
 ---
 
-## STEP 4 — FINALIZE THE RUN
+## STEP 4 — INGEST & FINALIZE (orchestrator owns all DB writes)
 
-After **all** subagents return, mark the run complete and set its counters. There is no
-dedicated "finalize" CLI in INTERFACES; use the documented helper
-`pipeline.db.update_run_counts` (INTERFACES §2) directly:
+Now — and only now — does the database get written. **You** (the orchestrator) ingest the
+objects the workers returned; the workers never touched the DB.
 
-```bash
-.venv/bin/python -c "
-from pipeline.db import get_conn, update_run_counts
-conn = get_conn('data/aeo.db')
-update_run_counts(conn, run_id=<run_id>,
-                  n_queries=<total rows attempted>,
-                  n_ok=<rows accepted by ingest>,
-                  n_failed=<rows never accepted>,
-                  status='done')
-"
-```
+1. **Collect** every `QueryCapture` object the workers returned into one **JSON array**,
+   write it to a temp file (to stay UTF-8/Cyrillic-safe), and ingest it into the run:
+   ```bash
+   .venv/bin/python -m pipeline.ingest --run-id <run_id> < /tmp/open_geo_batch.json
+   ```
+   Read stdout `{"run_id", "ok": [...], "errors": [...]}` (INTERFACES §3.2). Fix any row in
+   `errors` — correct the field from the returned data, or re-dispatch that one `(query,
+   lens)` to a worker — and re-send **only** the fixed objects to the same `--run-id`.
+   Repeat until `errors` is empty (bounded retries; then report residual failures).
 
-- `n_ok` = total distinct rows ingest accepted across all workers; `n_failed` = rows that
-  never made it in. Set `status='done'` on success, or `'failed'` if the run collapsed
-  (e.g. playbook missing, engine unreachable for everything). A completed run with
-  `status='done'` is what unlocks previous-run **deltas** for `--period all` (INTERFACES §4.1).
+2. **Finalize** counts + status. There is no "finalize" CLI; use the documented helper
+   `pipeline.db.update_run_counts` (INTERFACES §2) inline:
+   ```bash
+   .venv/bin/python -c "
+   from pipeline.db import get_conn, update_run_counts
+   conn = get_conn('data/aeo.db')
+   update_run_counts(conn, run_id=<run_id>,
+                     n_queries=<total rows attempted>,
+                     n_ok=<rows accepted by ingest>,
+                     n_failed=<rows never accepted>,
+                     status='done')
+   "
+   ```
+   `n_queries` = total `(query, lens)` rows attempted (from the CSV); `n_ok` = rows ingest
+   accepted; `n_failed` = rows that never made it in. Set `status='done'` on success, or
+   `'failed'` if the run collapsed (playbook missing, engine unreachable for everything). A
+   completed run with `status='done'` is what unlocks previous-run **deltas** for
+   `--period all` (INTERFACES §4.1). **Never leave a run stuck in `status='running'`.**
 
 ---
 
@@ -209,6 +240,11 @@ update_run_counts(conn, run_id=<run_id>,
 
 ## STEP 6 — EMIT DELIVERABLE(S) per `--output`
 
+> **Ordering — the skill does this, not a worker, and only after steps 3–5.** Deliverables
+> are produced by the **orchestrator** once every capture is collected & ingested, the run
+> is finalized, and metrics are aggregated. A capture worker **never** starts a server or
+> generates a report. Start long-running servers in the **background** on a **free port**.
+>
 > The **report** and **dashboard** components are **built** and their entry points are
 > **verified working** (commands below are the real ones). They are intentionally **not in
 > INTERFACES** — their contracts live in their own dirs (`report/generate.py` and
@@ -223,12 +259,13 @@ query-string-scoped link. The dashboard defaults its UI language to `--lang` (th
 switcher can change it).
 
 ```bash
-# 1) API (read-only over data/aeo.db). PICK A FREE PORT — see caveat below:
+# Run BOTH in the background (they are long-running dev servers).
+# 1) API (read-only over data/aeo.db). PICK A FREE PORT — 8000 is often taken:
 OPEN_GEO_DB=data/aeo.db .venv/bin/python -m uvicorn dashboard.api:app \
     --host 127.0.0.1 --port <PORT>
 
-# 2) Web (Vite dev server):
-cd dashboard/web && npm install && npm run dev   # serves http://localhost:5173
+# 2) Web (Vite dev server), pointed at the API's port:
+cd dashboard/web && npm install && VITE_API_BASE=http://127.0.0.1:<PORT> npm run dev
 ```
 
 - **Port caveat:** local port **8000 is often already occupied** by another service on
@@ -294,7 +331,7 @@ If `--period all` and a previous completed run exists, you may mention the direc
 Example shape (English; fill with real numbers; one `lens="all"` row drives it):
 
 ```
-Run for brand "Acme" (engine google_ai_overview), queries: 30.
+Run for brand "Acme" (engine google), queries: 30.
 • AI Overview coverage: 73% (22 of 30 queries).
 • Visibility in sources: 41% of overview queries.
 • Visibility in citations: 32% of overview queries.
@@ -312,8 +349,8 @@ Report: reports/acme_2026-06-19.pdf · Dashboard: http://localhost:5173
 |---|---|---|
 | 0 | `audit.gate` (name TBD) | **Not built** — ROADMAP Feature 2; no-op placeholder for now |
 | 1 | `python -m pipeline.ingest --new-run` | Contract in INTERFACES §3.1 |
-| 3 | `engines/<engine>.md` playbook; `python -m pipeline.ingest --run-id` | Capture contract §1, ingest §3.2; playbook file may be absent early |
-| 4 | `pipeline.db.update_run_counts` | Helper in INTERFACES §2 (no CLI — call inline) |
+| 3 | `capture-worker` subagent (`.claude/agents/capture-worker.md`) driving `engines/<engine>.md` (workers **capture & return JSON** — no DB writes) | Capture contract §1; playbook file may be absent early |
+| 4 | `python -m pipeline.ingest --run-id` (orchestrator) + `pipeline.db.update_run_counts` | Central ingest §3.2 + finalize helper §2 (call inline) |
 | 5 | `python -m pipeline.aggregate --run-id` | Contract in INTERFACES §3.3 |
 | 6 | `python -m report.generate … --lang <lang>`; dashboard API (`uvicorn dashboard.api:app`) + web (`npm run dev`) | **Built** — entry points confirmed/working; contracts live in `report/` & `dashboard/` (intentionally not in INTERFACES) |
 

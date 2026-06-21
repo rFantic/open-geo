@@ -3,7 +3,9 @@
   "owner": {
     "name": "open-geo contributors"
   },
-  "description": "Single-plugin marketplace for open-geo, the GEO visibility tracker.",
+  "metadata": {
+    "description": "Single-plugin marketplace for open-geo, the GEO visibility tracker."
+  },
   "plugins": [
     {
       "name": "open-geo",

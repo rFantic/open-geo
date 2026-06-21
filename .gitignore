@@ -63,3 +63,20 @@ Thumbs.db
 
 # --- Local Claude Code settings (machine-specific; skills stay committed) ---
 .claude/settings.local.json
+# Debugger / run configs — machine-specific dev convenience, in any .claude/ dir
+# (the committed skill under .claude/skills/ stays tracked)
+**/.claude/launch.json
+
+# --- Secrets / local env (never commit to a public repo) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# local override files anywhere (e.g. dashboard/web/.env.local)
+*.local
+
+# --- Personal / scratch query inputs ---
+# The canonical shared sample is examples/questions.csv (kept committed). Drop
+# your own real or scratch query lists here without committing them.
+examples/test_queries.csv
