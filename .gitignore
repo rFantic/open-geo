@@ -16,6 +16,7 @@
 .claude/skills/bug-hunt/
 # Launch notes + personal smoke-test inputs.
 /LAUNCH.md
+/LAUNCH_POSTS.md
 /*_smoke.csv
 
 # --- Python ---

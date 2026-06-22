@@ -44,7 +44,7 @@ ambiguous — the shapes there win over this prose.
 | arg | meaning |
 |---|---|
 | `<questions.csv>` | Path to the input CSV. Columns: **`query,lens`** where `lens ∈ general \| branded \| comparative`. See `examples/questions.csv` for a ready sample. `general` = neutral query, no brand named; `branded` = brand explicitly named; `comparative` = brand vs alternatives. |
-| `<engine>` | Engine id, **snake_case**, e.g. `google`. This value is (a) the `engine` field written into every `QueryCapture` and the run, and (b) the basename of the capture playbook the workers load: `engines/<engine>.md` (so `google` ↔ `engines/google.md`). **This is the multi-engine extension point** — `google` (Google AI Overview) is the only playbook shipping today; the others (ChatGPT, Perplexity, Gemini, Claude, Yandex, DeepSeek, …) are on the roadmap (ROADMAP Feature 3), and adding one is mainly authoring `engines/<engine>.md` (see `engines/README.md`). |
+| `<engine>` | Engine id, **snake_case**, e.g. `google`. This value is (a) the `engine` field written into every `QueryCapture` and the run, and (b) the basename of the capture playbook the workers load: `engines/<engine>.md` (so `google` ↔ `engines/google.md`). **This is the multi-engine extension point** — `google` (Google AI Overview), `chatgpt_search` (ChatGPT web search), `claude_search` (Claude web search), `yandex_neuro` (Yandex Alice / Нейро) and `gemini` (Google Gemini) ship today; the others (Perplexity, DeepSeek, …) are on the roadmap (ROADMAP Feature 3), and adding one is mainly authoring `engines/<engine>.md` (see `engines/README.md`). |
 | `<domain>` | The **target** domain to score. Accept any spelling (`https://www.example.com`, `example.com`); the pipeline normalizes it via `pipeline.schema.normalize_domain`. Workers match the target with this same normalizer so matching is consistent. |
 
 ### Flags
@@ -83,8 +83,8 @@ Run this **first**, before STEP 0. Goal: end up with every required parameter re
    b. Ask **only for the missing** parameters, using `AskUserQuestion` for the enumerable ones:
       - `engine` — offer only engines that actually have a playbook:
         `.venv/bin/python -c "import glob,os; print('\n'.join(sorted(os.path.basename(p)[:-3] for p in glob.glob('engines/*.md') if os.path.basename(p)!='README.md')))"`
-        (today: `google`). If the user names an engine without a playbook, say it is not available
-        yet (ROADMAP Feature 3) and stop.
+        (today: `google`, `chatgpt_search`, `claude_search`, `yandex_neuro`, `gemini`). If the user names an engine without a playbook, say it is
+        not available yet (ROADMAP Feature 3) and stop.
       - `--n-worker` — presets `1 / 3 / 5 / 10` (+ custom).
       - `--output` — `dashboard / pdf / both`. `--period` — `today / all`. `--lang` — `en / ru / zh / ar`.
       - `questions.csv` — offer found CSVs (+ "other path"):
@@ -162,8 +162,10 @@ print(json.dumps({'run_id': find_unfinished_run(conn, bid, '<engine>')}))
      user (in `--lang`) that the playbook for this engine is not present yet and must be
      added before a run — the capture contract still applies, but the engine-specific "how
      to drive it" lives in that file. The pattern for authoring a new engine playbook is in
-     `engines/README.md` (multi-engine is ROADMAP Feature 3). *(Only `engines/google.md`
-     ships today; passing any other engine id needs its playbook written first.)*
+     `engines/README.md` (multi-engine is ROADMAP Feature 3). *(`engines/google.md`,
+     `engines/chatgpt_search.md`, `engines/claude_search.md`, `engines/yandex_neuro.md`
+     and `engines/gemini.md` ship today; passing any other engine id needs its playbook
+     written first.)*
 3. **If resuming an existing run** (STEP 1 returned one), drop rows already captured —
    read the captured keys and keep only the missing `(query, lens)`:
    ```bash

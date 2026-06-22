@@ -33,7 +33,7 @@ validates every object against it.
 |---|---|---|---|
 | `query` | string | yes | The exact query sent to the engine. |
 | `lens` | `"general" \| "branded" \| "comparative"` | yes | Framing of the query. `general` = neutral, no brand named; `branded` = brand explicitly named; `comparative` = brand vs alternatives. |
-| `engine` | string | yes | Engine id, snake_case — the orchestrator's `<engine>` argument **copied through verbatim** (it equals the capture playbook basename, e.g. `google` ↔ `engines/google.md`); do not hardcode a different value. **Open string by design** — this is the multi-engine extension point: one `engines/<engine>.md` playbook per engine, and supporting more (ChatGPT, Gemini, Claude, Perplexity, Yandex, DeepSeek, …) is a backlog item (ROADMAP Feature 3). |
+| `engine` | string | yes | Engine id, snake_case — the orchestrator's `<engine>` argument **copied through verbatim** (it equals the capture playbook basename, e.g. `google` ↔ `engines/google.md`, `chatgpt_search` ↔ `engines/chatgpt_search.md`); do not hardcode a different value. **Open string by design** — this is the multi-engine extension point: one `engines/<engine>.md` playbook per engine. Shipped today: **`google`** (Google AI Overview), **`chatgpt_search`** (ChatGPT web search), **`claude_search`** (Claude web search), **`yandex_neuro`** (Yandex Alice / Нейро) and **`gemini`** (Google Gemini); more (Perplexity, DeepSeek, …) remain a backlog item (ROADMAP Feature 3). |
 | `captured_at` | string (ISO-8601 datetime) | yes | When the answer was captured. Parsed by pydantic into `datetime`. Use UTC, e.g. `"2026-06-18T20:15:30Z"`. |
 | `answer_text_md` | string \| null | no (default `null`) | The answer prose as Markdown. `null` if no overview / not captured. |
 | `screenshot_path` | string \| null | no (default `null`) | **v1: always `null`.** A *transient* screenshot may be taken to read the overview, but screenshots are **not persisted**, so nothing is stored here (column kept for forward-compat). |
@@ -358,11 +358,21 @@ mid-run never loses already-captured work:
       { "lens": "general", "...": "..." },
       { "lens": "branded", "...": "..." },
       { "lens": "comparative", "...": "..." }
+    ],
+    "top_domains": [
+      { "domain": "g2.com", "is_brand": 0,
+        "appearances_sources": 14, "appearances_citations": 6,
+        "sum_min_source_rank": 25.0, "sum_min_citation_rank": 7.0,
+        "avg_source_position": 1.786, "avg_citation_position": 1.167 }
     ]
   }
   ```
 - A lens row is emitted only for lenses present in the run's results; the `all`
   row is always emitted.
+- **`top_domains`** echoes the **`all`-scope top-10 rows of `domain_stats`** (the
+  leaderboard, §2/§4.2) as a convenience slice — each entry is one `domain_stats`
+  row (same fields as the table). The authoritative, per-lens leaderboard lives in
+  the `domain_stats` table; this STDOUT field is just the headline `all` top-10.
 - **Also writes `domain_stats` (§2/§4.2).** In the same pass `aggregate` `DELETE`s + rebuilds the
   run's `domain_stats` rows — the per-domain frequency + average-position leaderboard over **every**
   domain in `sources`/`citations`, per lens + `all`. This is deterministic and idempotent on
@@ -414,15 +424,25 @@ from the panel is still recorded as a source — which is exactly why the funnel
 holds and `n_cited` can never exceed `n_in_sources`.
 
 > **Scope note (multi-engine).** This metric model — and especially
-> `overview_present` as the **denominator gate** — is specified against **Google
-> AI Overview**, where an overview may legitimately not render. The rest of the
-> contract is **engine-agnostic** (`engine` is an open id; the funnel and the
-> `sources` / `citations` shapes apply to any answer engine). Extending capture to
-> other engines (ChatGPT, Gemini, Claude, Perplexity, Yandex, DeepSeek, …) is a
-> **backlog item — ROADMAP Feature 3**. For always-answering chat assistants the
-> top-of-funnel gate is expected to be **reinterpreted** (e.g. "a grounded /
-> sourced answer rendered" rather than "an overview rendered"); until that lands,
-> the definitions below describe the Google surface.
+> `overview_present` as the **denominator gate** — was first specified against
+> **Google AI Overview**, where an overview may legitimately not render. The rest
+> of the contract is **engine-agnostic** (`engine` is an open id; the funnel and
+> the `sources` / `citations` shapes apply to any answer engine). For
+> **always-answering** chat assistants a reply alone is meaningless as a
+> denominator, so the top-of-funnel gate is **reinterpreted per engine** as "a
+> grounded / sourced answer rendered" rather than "an overview rendered". **This
+> has landed for `chatgpt_search`, `claude_search`, `yandex_neuro` and `gemini`**
+> (`engines/chatgpt_search.md`, `engines/claude_search.md`, `engines/yandex_neuro.md`,
+> `engines/gemini.md`):
+> there `overview_present` means *the model ran a web search and rendered a sourced
+> answer* (it retrieved ≥1 source and surfaced sources / inline citations) — the
+> **same field, same funnel shape**
+> (`n_cited ≤ n_in_sources ≤ n_overviews ≤ n_queries`), only the top-of-funnel
+> reading changes, so the contract field is unchanged. The remaining engines
+> (Perplexity, DeepSeek, …) are still a **backlog item —
+> ROADMAP Feature 3**, each pinning its own gate when its playbook is authored.
+> Where an engine's reading differs, the metric labels stay engine-neutral in the
+> UI (e.g. "Answer coverage"); the formulas below are unchanged across engines.
 
 | metric | formula | guard |
 |---|---|---|

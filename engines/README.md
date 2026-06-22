@@ -17,20 +17,23 @@ backlog spec is **ROADMAP Feature 3**.
 | engine id | surface | status |
 |---|---|---|
 | `google` | Google Search → AI Overview | **implemented** — [`google.md`](google.md) (reference playbook) |
-| `chatgpt_search` | ChatGPT with web search | planned (Feature 3) |
+| `chatgpt_search` | ChatGPT with web search | **implemented** — [`chatgpt_search.md`](chatgpt_search.md) (grounded-answer gate) |
+| `claude_search` | Claude with web search | **implemented** — [`claude_search.md`](claude_search.md) (grounded-answer gate) |
+| `gemini` | Google Gemini | **implemented** — [`gemini.md`](gemini.md) (grounded-answer gate) |
+| `yandex_neuro` | Yandex Alice / Нейро | **implemented** — [`yandex_neuro.md`](yandex_neuro.md) (grounded-answer gate) |
 | `perplexity` | Perplexity | planned (Feature 3) |
-| `gemini` | Google Gemini | planned (Feature 3) |
-| `claude_search` | Claude with web search | planned (Feature 3) |
-| `yandex_neuro` | Yandex Alice / Нейро | planned (Feature 3) |
 | `deepseek` | DeepSeek with search | planned (Feature 3) |
 | … | Bing / Microsoft Copilot, You.com, Baidu, … | future, as the market evolves |
 
-> The implemented id is **`google`** — canonical because it equals the playbook basename
-> `engines/google.md` (INTERFACES §1.1) and the value written to the live run/DB; that is what
-> `/open-geo` expects. The seed/fixture/test layer uses the same `google` id. The **planned** engine ids above are
-> **proposals**; the final naming scheme (`<vendor>_<surface>`) is an open decision in ROADMAP
-> Feature 3. If `/open-geo` is invoked with an engine whose `engines/<engine>.md` is missing,
-> the skill **stops and asks for the playbook** — it never invents a capture procedure.
+> The implemented ids are **`google`**, **`chatgpt_search`**, **`claude_search`**,
+> **`yandex_neuro`** and **`gemini`** — each canonical because it equals its playbook basename
+> (`engines/google.md`, `engines/chatgpt_search.md`, `engines/claude_search.md`,
+> `engines/yandex_neuro.md`, `engines/gemini.md`; INTERFACES §1.1) and the
+> value written to the live run/DB; that is what `/open-geo` expects. The `<vendor>_<surface>` naming
+> scheme is now in use (`chatgpt_search` = ChatGPT's *search* surface, the one GEO measures); the
+> remaining **planned** ids above are still **proposals** for ROADMAP Feature 3. If `/open-geo` is
+> invoked with an engine whose `engines/<engine>.md` is missing, the skill **stops and asks for the
+> playbook** — it never invents a capture procedure.
 
 ## How to add an engine
 

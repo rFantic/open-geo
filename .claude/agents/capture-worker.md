@@ -47,7 +47,14 @@ the capture playbook you are given.
    ```
    Fix any `ValidationError` (re-capture the field with the browser still open) until it prints
    `valid`.
-4. **Return** your validated `QueryCapture` objects as a **JSON array**, plus a one-line status:
+4. **Close every tab you opened — leave the browser as you found it.** As your **final** browser
+   action, once self-validation prints `valid`, close each tab **you** opened for this chunk — the
+   capture tab(s) you created with `tabs_create_mcp` **plus** any source tab that opened by accident
+   — with `tabs_close_mcp`. Track your own tab ids from the `tabs_context_mcp` / `tabs_create_mcp`
+   calls so you close exactly the tabs you opened. **Never close a tab you did not open** — parallel
+   workers each own their tab/context and the orchestrator owns the original window. Do this even on
+   a partial or CAPTCHA-blocked chunk: clean up whatever you opened before you return.
+5. **Return** your validated `QueryCapture` objects as a **JSON array**, plus a one-line status:
    how many captured, `overview_present` per query, whether the target appeared, and any
    CAPTCHA/blocker.
 
@@ -56,5 +63,6 @@ the capture playbook you are given.
   `engines/<engine>.md`).
 - If the engine shows a bot-challenge / CAPTCHA, **stop** and surface it — never solve or hammer
   it. Other workers keep going.
-- Get tab context before using browser tools; capture in your own tab; close stray tabs.
+- Get tab context before using browser tools; capture in your own tab; when done close **every tab
+  you opened** (your capture tab(s) + any stray tab) with `tabs_close_mcp` — never a tab you didn't open.
 - Run Python via the project venv (`.venv/bin/python`) from the repo root.
