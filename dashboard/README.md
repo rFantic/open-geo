@@ -7,8 +7,8 @@ brand/engine selectors are **data-driven** — the engine list is whatever has r
 (`/api/engines`), so as capture expands beyond Google AI Overview (ROADMAP Feature 3) new
 engines surface automatically with no dashboard change (the Google-flavored metric *labels*
 in `i18n/` are the one thing Feature 3 may revisit). The
-React UI has light & dark themes (toggle, system-aware), an **EN/RU language switcher**
-(extensible — driven by `i18n/`, see below), and per-metric `(i)` tooltips carrying the
+React UI has light & dark themes (toggle, system-aware), a **language switcher** (EN/RU/ZH/AR,
+extensible — driven by `i18n/`, see below), and per-metric `(i)` tooltips carrying the
 §4 definitions; it lives in `web/src/redesign/` as a self-contained, dependency-free
 design system (semantic CSS-variable tokens, inline SVG icons).
 
@@ -49,6 +49,17 @@ Then start the frontend with `VITE_API_BASE=http://127.0.0.1:8077 npm run dev` (
 Frontend section). Only when you stay on `--port 8000` does the bare `npm run dev` proxy
 line up without `VITE_API_BASE`.
 
+> **Launching from outside the repo root / in a background shell** (e.g. an orchestrator
+> that backgrounds the servers and does **not** inherit the repo-root CWD): use absolute
+> paths and `--app-dir`, since a relative `.venv/bin/python` fails with exit 127. The form
+> that works from any CWD (`<REPO>` = absolute repo root):
+> ```bash
+> OPEN_GEO_DB=<REPO>/data/aeo.db <REPO>/.venv/bin/python -m uvicorn dashboard.api:app \
+>     --host 127.0.0.1 --port 8077 --app-dir <REPO>
+> # frontend — no `cd`:
+> VITE_API_BASE=http://127.0.0.1:8077 npm --prefix <REPO>/dashboard/web run dev
+> ```
+
 ### Endpoints
 
 | method | path | purpose |
@@ -57,18 +68,32 @@ line up without `VITE_API_BASE`.
 | GET  | `/api/brands` | `[{id, name, domain}]` |
 | GET  | `/api/engines?brand_id=` | distinct engines for a brand |
 | GET  | `/api/runs?brand_id=&engine=` | runs newest-first |
-| GET  | `/api/metrics?brand_id=&engine=&period=today\|all&lens=` | metrics + read-time deltas |
+| GET  | `/api/metrics?brand_id=&engine=&period=today\|all&lens=` | metrics + read-time deltas + per-lens `sentiment_summary` |
 | GET  | `/api/timeseries?brand_id=&engine=&lens=` | per-run points over time (retrospective) |
 | GET  | `/api/results?run_id=&lens=` | per-query rows (JSON cols decoded, incl. sentiment) |
 | GET  | `/api/i18n` | the `i18n/locales.json` registry — `[{code, name}]`, drives the language switcher |
 | GET  | `/api/i18n/{code}` | that locale's string dict (`i18n/<code>.json`); falls back to `en` for an unknown code |
-| POST | `/api/report?brand_id=&engine=&period=today\|all&lang=en\|ru` | runs `report.generate` (with `--lang`), streams the PDF |
+| POST | `/api/report?brand_id=&engine=&period=today\|all&lang=en\|ru\|zh\|ar` | runs `report.generate` (with `--lang`), streams the PDF |
 
 `period` semantics for `/api/metrics`:
 - `today` → snapshot of the latest **completed** run; each rate metric carries a
   `*_delta` vs the previous completed run (INTERFACES §4.1, matched per lens).
 - `all` → whole-period view aggregated across **all** completed runs (the §4 ratios
   recomputed from summed numerators/denominators); no per-run delta in this mode.
+
+Each per-lens row from `/api/metrics` (incl. the `all` row) also carries
+**`sentiment_summary`** (`string | null`) — the orchestrator's per-lens **qualitative** roll-up
+of that lens's per-query `sentiment`s, read from the `lens_sentiment` table (INTERFACES §2; it is
+written at finalize by the `/open-geo` skill via `pipeline.lens_sentiment`, **not** by
+`pipeline.aggregate`). `null` means the brand appeared in no query of that lens. It is text, not a
+number, and follows the language of the captured sentiments (independent of the UI language). The
+web UI surfaces these as a **"Sentiment by lens"** panel above the per-query results table.
+Because the API is **read-only and never calls `init_db`**, a DB created before this table existed
+degrades gracefully: the endpoint returns rows with `sentiment_summary: null` (catching
+`no such table`) instead of erroring.
+
+The frontend shows the **Trend across runs** chart only in the `all` (whole-period) view; the
+`today` (latest-run) view is a pure snapshot — KPI cards with read-time deltas, no trend chart.
 
 `/api/report` invokes the report CLI
 (`python -m report.generate --brand --domain --engine --period --lang --out --db`) into a
@@ -90,13 +115,19 @@ npm install
 npm run dev      # http://localhost:5173  (proxies /api -> http://127.0.0.1:8000)
 ```
 
-The header carries an **EN/RU language switcher** (and a light/dark theme toggle). It fetches
+The header carries a **language switcher** (EN/RU/ZH/AR; and a light/dark theme toggle). It fetches
 `GET /api/i18n` for the available locales and `GET /api/i18n/<chosen>` for the active string
 dict, looks strings up via `t("namespace.key")`, defaults to `en`, and persists the choice in
 `localStorage`. Missing keys fall back to English per key, so a partial translation never
 breaks the UI. To add a language, drop a JSON file into `i18n/` and register it in
 `i18n/locales.json` (full instructions in `i18n/README.md`) — it appears in the switcher
 automatically.
+
+**Initial UI language.** On first load the language is resolved as `?lang=<code>` URL param
+→ persisted `localStorage["og-lang"]` → `en`. So `http://localhost:5173/?lang=ru` opens in
+Russian without touching the switcher (the switcher still overrides and persists the choice;
+an unknown code falls back to English per key). This is how `/open-geo --lang` seeds the
+dashboard language.
 
 Production build:
 
@@ -124,9 +155,9 @@ VITE_API_BASE=http://127.0.0.1:8077 npm run build
 OPEN_GEO_DB=data/_fixture_dash.db .venv/bin/python -m uvicorn dashboard.api:app \
     --host 127.0.0.1 --port 8077
 
-# 3. Probe it (the fixture seeds engine `google_ai_overview`, not the live `google`):
+# 3. Probe it (the fixture seeds engine `google` — the same id as a live run):
 curl -s 'http://127.0.0.1:8077/api/brands'
-curl -s 'http://127.0.0.1:8077/api/metrics?brand_id=1&engine=google_ai_overview&period=today'
+curl -s 'http://127.0.0.1:8077/api/metrics?brand_id=1&engine=google&period=today'
 curl -s 'http://127.0.0.1:8077/api/i18n'
 
 # 4. Build the frontend:

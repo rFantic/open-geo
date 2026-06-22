@@ -14,6 +14,7 @@ from pipeline.db import (
     get_conn,
     get_or_create_brand,
     update_run_counts,
+    upsert_lens_sentiment,
 )
 from pipeline.ingest import insert_capture
 from pipeline.schema import Link, QueryCapture, normalize_domain
@@ -21,7 +22,7 @@ from pipeline.schema import Link, QueryCapture, normalize_domain
 DB_PATH = "data/aeo.db"
 BRAND_NAME = "Acme"
 BRAND_DOMAIN = "acme.com"
-ENGINE = "google_ai_overview"
+ENGINE = "google"
 TARGET = normalize_domain(BRAND_DOMAIN)
 
 _OTHER_DOMAINS = [
@@ -81,6 +82,13 @@ _SENTIMENTS_NEUTRAL = [
     "listed alongside other popular manufacturers",
     "named without a clear judgement, next to competitors",
 ]
+
+_LENS_SUMMARIES = {
+    "general": "Mostly mentioned neutrally among alternatives, occasionally recommended.",
+    "branded": "Consistently surfaced as the authority on its own brand queries, often with a direct catalog link.",
+    "comparative": "Named alongside competitors without a clear edge.",
+    "all": "Visible across lenses: confident on branded queries, neutral elsewhere, and present but undifferentiated in comparisons.",
+}
 
 
 def _link(rank: int, domain: str, slug: str) -> Link:
@@ -303,6 +311,13 @@ def seed(db_path: str = DB_PATH, *, reset: bool = False, seed_value: int = 20260
             )
 
             latest_summary = aggregate_run(conn, run_id)
+
+            lenses_present = {cap.lens for cap in captures}
+            for lens in ("general", "branded", "comparative"):
+                if lens in lenses_present:
+                    upsert_lens_sentiment(conn, run_id, lens, _LENS_SUMMARIES[lens])
+            upsert_lens_sentiment(conn, run_id, "all", _LENS_SUMMARIES["all"])
+
             print(
                 f"seed_demo: run {run_id} ({run_at.date()}) — {len(captures)} results, metrics filled",
                 file=sys.stderr,

@@ -5,6 +5,153 @@ Running-log архитектурных/модельных решений, вын
 док-дисциплина (порядок правок, критерий «готово») остаются в `CLAUDE.md` → Conventions;
 любая значимая архитектурная/модельная правка добавляет строку сюда.
 
+- 2026-06-22 — **doc-sync (--fix): формулировка ingest в README (EN/RU/ZH/AR) приведена к инкрементальной.**
+  Раздел «How it works» п.3 во всех четырёх README утверждал, что оркестратор «собирает всё и делает один
+  центральный ingest» — это описывало ровно запрещённый паттерн «ingest одним батчем в конце» и расходилось
+  с `INTERFACES.md` §1/§2.1, `SKILL.md` STEP 4.1 и gotcha в `CLAUDE.md` (ingest идёт инкрементально, чанк за
+  чанком, как воркеры возвращаются — durability/resume). Переформулировано: оркестратор владеет всеми
+  записями в БД и ingest-ит чанк каждого воркера сразу по возвращении. Тронуты только README (доки);
+  контракт/код/CLI/БД-схема не менялись. Триггер — `/doc-sync --fix`.
+
+- 2026-06-22 — **PDF-отчёт корректно рендерит zh (中文) и ar (العربية): бандл OFL-шрифтов + Arabic shaping/bidi/RTL.**
+  Раньше `report.generate --lang zh|ar` давал валидный PDF, но нечитаемый: zh — пустые квадраты (DejaVu без
+  CJK-глифов, ~42 matplotlib-warning «Glyph missing»), ar — буквы несоединённые и в обратном порядке (нет
+  shaping/bidi). Дашборд оба показывал верно. Закрыто целиком. **(1) Бандл шрифтов** в `fonts/` (новые
+  `fonts/build.py` + `fonts/README.md` + OFL-тексты): **Noto Sans SC** (zh; субсет GB2312 ~6.7k иероглифов +
+  chrome, ~2 МБ/начертание) и **Noto Naskh Arabic** (ar; полное покрытие), Regular+Bold, инстансированы из
+  апстрим-VF (google/fonts, OFL 1.1) и слимлены (выкинуты layout/variation/vertical/hinting таблицы — Arabic
+  шейпим сами); три глифа-стрелки дельт `▲▼▬` **синтезируются** в шрифт при сборке (их нет в сабсетах) →
+  остаются OFL-only. **(2) Пер-язычный выбор шрифта** — `register_fonts(lang)` подменяет модульные
+  `FONT/FONT_BOLD/FONT_OBLIQUE` (zh→Noto SC, ar→Noto Naskh, en/ru→DejaVu) и matplotlib `font.family`
+  (fallback-стек); ReportLab пер-глифовый fallback не умеет, поэтому именно выбор, а не стек. **(3) Arabic
+  shaping** — новый `report/textshape.py` (`arabic_reshaper`→`python-bidi`, добавлены в зависимости):
+  reshape→bidi навешан на `canvas.draw*` (обёртка) и на matplotlib-метки; абзацы право-выравниваются
+  (`Doc.rtl`). **(4) en/ru — байт-стабильны** (та же DejaVu, shape = no-op; два рендера различаются лишь
+  волатильным ReportLab `/ID`). Тесты `tests/test_report_render.py` расширены (zh/ar в параметризации; guard
+  «ноль Glyph-missing для zh»; shaping/bidi-санити для ar; en не встраивает Noto); покрытие `report` 100%,
+  полный прогон зелёный. Verify: `seed_demo` → рендер en|ru|zh|ar (Acme/acme.com/google/all) — глифы и shaping
+  корректны на всех 4. Доки: PDF-font-caveat убран из README(.ru) (переработаны владельцем), `CLAUDE.md`
+  Stack+Gotcha, `requirements.txt` (+arabic-reshaper/+python-bidi), `.gitignore` (`fonts/.cache/`). Триггер — запрос пользователя.
+- 2026-06-22 — **README: полная переработка под пользователя + мультиязычность (EN/RU/ZH/AR).**
+  По запросу владельца README переписан как продуктовая витрина. Убраны разделы Usage / Languages-i18n /
+  Project structure / Testing-CI и все упоминания роадмапа; «Команды» свёрнуты к одной `/open-geo` (без
+  Python-CLI); Quick start переписан под Claude-флоу (clone → попросить Claude установить → команда) и
+  показан запуск через `/loop`; добавлено простое объяснение воронки (queries → AI Overview → in sources →
+  cited). В «Sample output» обложка PDF заменена страницей метрик (`assets/report-metrics.png`) + добавлены
+  скриншоты дашборда на 4 языках (`assets/dashboard-{en,ru,zh,ar}.png`, ar — RTL); карточка в `assets/cover.svg`
+  упрощена до `/open-geo`, буллеты — мультидвижковость + EN·RU·ZH·AR. Созданы `README.ru.md` (перезапись),
+  `README.zh.md`, `README.ar.md` как переводы канона `README.md`. **Намеренное расхождение позиционирования:**
+  по явному выбору владельца README подаёт мультидвижковость **смело** («любой AI-движок»), тогда как
+  `CLAUDE.md` / `INTERFACES.md` / `engines/README.md` остаются честными (реализован только `google`, остальные
+  движки — плейбуки к добавлению). Это маркетинговая витрина ≠ инженерная правда: **doc-sync НЕ должен
+  откатывать README к «только Google»** без решения владельца. Тронуты только доки/ассеты; контракт/код/БД-схема
+  не менялись (для скриншота демо-БД пересеяна `seed_demo --reset` + вручную добавлены демо-строки `lens_sentiment`).
+
+- 2026-06-22 — **Захват стал durable: инкрементальный ingest + resume прерванного прогона + идемпотентный `(run_id,query,lens)`.**
+  Раньше результаты писались в БД одним батчем в самом конце (SKILL STEP 4), а `ingest_batch` затирал счётчики и
+  ставил `status='done'` на КАЖДОМ вызове — крах в середине (или потеря сессии-оркестратора до ingest) терял всё
+  захваченное, а частичный прогон выглядел «done» (и не находился для resume). Теперь: **(1)** оркестратор ingest-ит
+  **чанк каждого воркера сразу как тот вернулся** (INTERFACES §2.1, SKILL STEP 4.1) — крах не теряет уже захваченное;
+  **(2)** `(run_id, query, lens)` — уникальный ключ результата (`UNIQUE INDEX idx_results_run_query_lens`; `insert_capture`
+  → `INSERT … ON CONFLICT DO NOTHING RETURNING id`, возвращает `None` при дубле), `ingest` отдаёт `skipped` рядом с
+  `ok`/`errors` (§3.2) — повтор/overlap/resume идемпотентны (без дублей и раздувания метрик); **(3)** `ingest` больше
+  **НЕ** ставит `status`/`n_queries`/`n_failed`, держит лишь живой `n_ok = COUNT(results)` — финализирует прогон
+  только скилл (STEP 4.2); **(4) resume** — прерванный прогон остаётся `status='running'`, скилл находит его
+  `find_unfinished_run`, читает `get_captured_keys` и до-захватывает ТОЛЬКО недостающие `(query,lens)` в тот же run
+  (SKILL STEP 1 «create OR resume» + STEP 2 фильтр). `init_db` само-мигрирует старую БД (дедуп `(run_id,query,lens)`
+  по `MIN(id)` → создание уникального индекса; на live-БД 120 результатов сохранены, 0 дублей). Новые db-хелперы
+  `get_captured_keys` / `find_unfinished_run`. Тесты обновлены под новый контракт ingest + новые на индекс/хелперы/
+  миграцию/идемпотентность; полный прогон зелёный. Доки синхронизированы (INTERFACES §1/§2.1/§3.2, SKILL STEP 1/2/4,
+  CLAUDE Gotchas).
+- 2026-06-22 — **i18n: добавлены локали `zh` (中文) и `ar` (العربية) — теперь en/ru/zh/ar.**
+  Полный перевод всех 135 UI-ключей в `i18n/zh.json` и `i18n/ar.json` (структура зеркалит `en.json`;
+  брендовые имена `open-geo` / `AI Overview` / `AI Visibility Report` / `Google` и все `{placeholders}`
+  сохранены дословно), реестр `i18n/locales.json` расширен. **Кода менять не пришлось**: фронт
+  (`I18nProvider` → `/api/i18n`) и бэк (`dashboard/api.py`) читают реестр/словари динамически, а
+  `report --lang` уже принимает любой зарегистрированный код (на чтении — fallback на `en` по ключу).
+  `_DECIMAL_COMMA_LANGS` НЕ трогали: zh/ar используют точку как десятичный разделитель (в отличие от ru).
+  Arabic — RTL: строки переведены и хранятся как есть (вместо `→` в `funnel_intro` использованы слова),
+  но раскладка дашборда пока LTR (RTL-полировка — отдельная задача). **Известное ограничение PDF:**
+  `report.generate` встроен на DejaVu Sans (латиница/кириллица) — en/ru рендерятся полностью; zh даёт
+  пустые квадраты (нет CJK-глифов, ~42 matplotlib-warning на прогон), ar — глифы есть, но без shaping/bidi
+  (`arabic_reshaper`/`python-bidi` не установлены) буквы несоединённые и в обратном порядке. PDF при этом
+  валиден и не падает (exit 0); дашборд оба языка показывает корректно (шрифты браузера + shaping/RTL).
+  Полноценный zh/ar в PDF — отдельная задача (бандл Noto Sans SC + Noto Naskh Arabic, `arabic_reshaper` +
+  `python-bidi`, пер-язычный шрифт и RTL-абзацы). Добавлен guard-тест в
+  `tests/test_report_i18n.py`: ни одна зарегистрированная локаль не содержит ключей вне контракта
+  `en.json`. Доки синхронизированы (README / README.ru / dashboard/README / CLAUDE / SKILL / i18n/README).
+- 2026-06-22 — **Дашборд: таблица «Результаты по запросам» сворачиваемая, по умолчанию свёрнута.**
+  Таблица массивная (24 строки на прогон), поэтому в `RedesignApp` добавлен тоггл в `right`-слот панели:
+  по умолчанию свёрнуто (строка-подсказка «N rows hidden»), кнопка разворачивает/сворачивает
+  (`aria-expanded`, `ChevronDownIcon` с поворотом). Чистый UI — контракт/данные/БД не затронуты; новые
+  i18n-ключи `dashboard.results_expand|results_collapse|results_collapsed_hint` (en+ru). Тоггл скрыт при
+  0 строк (пустое состояние рендерится как раньше).
+
+- 2026-06-22 — **Пер-срезовая качественная сводка тональности: новая таблица `lens_sentiment` + CLI `pipeline.lens_sentiment`.**
+  Раньше тональность была только пер-запросной (`results.sentiment`) — читателю отчёта/дашборда приходилось
+  глазами агрегировать десятки фраз по срезу. Добавлен качественный роллап: на финализе **оркестратор**
+  (он и так LLM; SKILL новый STEP 5b) сворачивает `sentiment`-ы каждого среза (general/branded/comparative)
+  в одну короткую нейтральную фразу + синтез `all` и пишет их через новый `python -m pipeline.lens_sentiment
+  --run-id <N>` (JSON-объект `{lens: summary}` на STDIN; пайп через temp-файл ради UTF-8/кириллицы, как
+  batch-ingest в STEP 4) в новую таблицу `lens_sentiment` (`UNIQUE(run_id, lens)`). **Почему отдельная
+  таблица, а не `metrics`:** синтез пишет оркестратор, а `pipeline.aggregate` остаётся детерминированной
+  математикой и на ре-агрегации `DELETE`+пересобирает `metrics` — в общей таблице он затирал бы прозу.
+  Сводка **остаётся качественной** (текст, без балла/индекса/share-of-voice — правило §4 «нет числовой
+  тональности» не нарушено) и следует **языку данных, не `--lang`**. Surfacing: дашборд — полоса карточек
+  «Sentiment by lens» над таблицей результатов (`/api/metrics` пер-срезовые строки получают
+  `sentiment_summary: string|null`); PDF — вводная строка существующей секции тональности. Read-only API
+  дашборда `init_db` не вызывает → на старой БД без таблицы отдаёт «нет сводок» (ловит `no such table`), не
+  падает; `init_db` создаёт таблицу (`CREATE TABLE IF NOT EXISTS`) для форвард-миграции. Авторитет —
+  `INTERFACES.md` §2 (таблица + хелперы `upsert_lens_sentiment`/`get_lens_sentiments`), §3.4 (CLI), §4
+  (нота про синтез). Триггер — запрос пользователя.
+- 2026-06-22 — **Дашборд: график «Trend across runs» показывается только в режиме `all` (whole-period).**
+  Тоггл периода раньше вообще не влиял на график — он рисовал все прогоны и при `today` (latest-run), и при
+  `all`, т.е. контрол был «немым», а в latest-run полноразмерный мультисерийный тренд дублировал KPI-карточки
+  (с дельтами к предыдущему прогону, которые и есть мини-тренд снапшота). Теперь панель тренда рендерится
+  условием `period === "all"` в `RedesignApp.tsx`; latest-run — чистый снимок (карточки + дельты), без графика.
+  Чисто презентационная правка (контракт/метрики/БД/CLI не затронуты): обновлены тесты в
+  `RedesignApp.test.tsx` (latest-run скрывает график; тоггл на whole-period его раскрывает; empty-state тренда
+  проверяется в whole-period) и строка про поведение в `dashboard/README.md`.
+
+- 2026-06-22 — **Починка трёх проблем запуска, всплывших в боевом прогоне #6 (`/open-geo`, Аскона/`google`).**
+  (1) **Форвард-миграция БД:** `pipeline.aggregate` падал на стейл-БД (`OperationalError: table metrics has no
+  column named relative_citation`) — `init_db` использовал только `CREATE TABLE IF NOT EXISTS`, поэтому БД,
+  созданная до ре-добавления `relative_citation` (2026-06-19), молча сохраняла старую схему. Теперь `init_db`
+  добавляет недостающие колонки существующих таблиц через `ALTER TABLE … ADD COLUMN` (хелпер `_ensure_columns`;
+  пока `metrics.relative_citation`): стейл-БД самочинится на следующем старте без ручного `DROP` и без потери
+  данных (старые строки читаются как `NULL` до ре-агрегации). `INTERFACES §2` приведён под новое поведение
+  (ручной `DROP` из note убран), добавлены регресс-тесты в `tests/test_db.py`, obsolete NOTE-комментарий из
+  `db.py` удалён (конвенция «код без прозы»). (2) **Старт фоновых серверов:** команды дашборда в SKILL STEP 6
+  использовали относительный `.venv/bin/python` и `cd dashboard/web` — в фоновом shell (CWD ≠ корень репо) это
+  падало с exit 127. Заменено на абсолютные пути от `<REPO>` + `uvicorn --app-dir <REPO>` и
+  `npm --prefix <REPO>/dashboard/web` (без `cd`); добавлен шаг `curl`-проверки health/HTTP перед выдачей URL; то
+  же задокументировано в `dashboard/README.md`. (3) **`--lang` для дашборда:** `DEFAULT_LANG` был жёстко `"en"`
+  без override, поэтому `--lang ru` не применялся к UI. `getInitialLang()` теперь читает `?lang=<code>` (приоритет
+  URL-параметр → `localStorage` → `en`); SKILL отдаёт `http://localhost:5173/?lang=<lang>`; добавлены тесты в
+  `i18n.test.tsx`, задокументировано в `dashboard/README.md`. Контракт `QueryCapture`/метрики/CLI/схема
+  результатов НЕ менялись. Триггер — запрос пользователя.
+- 2026-06-22 — **README: цифры демо-примера приведены к реальному выводу `seed_demo` (доковый дрейф с 2026-06-19).**
+  Хедлайн, счётчики воронки, таблица «six metrics» и строка дельт в `README.md`/`README.ru.md` показывали
+  старые значения (coverage 0.79, воронка 24→19→9→7 и т.д.) — артефакт до-воронкового сида: рефактор воронки
+  2026-06-19 поменял генерируемые числа, но пример в README тогда не обновили. Приведено к авторитетному
+  выводу детерминированного `seed_demo` (run 5, `lens=all`): воронка **24→20→12→9**, coverage 0.83,
+  visibility_in_sources 0.60, visibility_in_citations 0.45, avg_source_position 2.50, relative_citation 0.75;
+  дельты к run 4 пересчитаны (0.39→0.60 / 0.22→0.45 / 0.57→0.75 / 2.14→2.50). Только доки (код/контракт/сид —
+  не трогались). Замечено при пересеве БД в ходе выравнивания `engine`→`google`.
+- 2026-06-22 — **`engine`: синтетический seed/fixture/test-слой выровнен на `google` (сплит `google_ai_overview` убран целиком).**
+  Раньше live-слой был на `google`, а демо/фикстура/тесты намеренно сидели на `google_ai_overview` как
+  изолированное исключение — из-за чего **пример дашборда и обложка PDF показывали не тот id, что live**
+  (репорт о баге от пользователя; перед публичным релизом это читается как нестыковка). Решение — убрать
+  сплит: `google` теперь **везде**, в полном соответствии с авторитетом `INTERFACES.md` §1.1 (`engine` =
+  basename плейбука). Тронуто: `pipeline/seed_demo.py`, `dashboard/seed_fixture.py`,
+  `report/_selftest_fixture.py`, help-строки `--engine` в `pipeline/ingest.py`/`report/generate.py`, ~50
+  ссылок в 9 Python-тест-файлах, фронтовый `dashboard/web/.../api.test.ts`; доки — гоча в `CLAUDE.md`,
+  аннотация+curl в `dashboard/README.md`, примечание в `engines/README.md`, пример в `i18n/README.md`,
+  подписи/alt в `README.md`/`README.ru.md`, правило исключений в `doc-sync/SKILL.md`. Пересеяны
+  `data/aeo.db` (`seed_demo --reset`) и `_fixture_dash.db`; перегенерены `assets/sample-report-acme.pdf` +
+  `assets/report-cover.png`. `engines/google.md` («do not substitute `google_ai_overview`») оставлен — guard
+  по-прежнему валиден. Сид детерминирован → цифры демо не изменились, только метка движка. Тесты: pytest +
+  vitest зелёные.
 - 2026-06-22 — **`/doc-sync --fix`: Status-таблица `engines/README.md` канонизирована на `google` (пропуск в свипе 2026-06-20).**
   Строка implemented-движка в `engines/README.md` всё ещё показывала id `google_ai_overview` → `google.md`, что
   противоречило INTERFACES §1.1 (`engine` = basename плейбука), самому `engines/google.md` («do not substitute

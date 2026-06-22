@@ -214,6 +214,54 @@ describe("getInitialLang() initial language", () => {
 });
 
 
+describe("getInitialLang() — ?lang= URL override", () => {
+  afterEach(() => {
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("uses ?lang= from the URL when no localStorage value is set", async () => {
+    window.history.replaceState({}, "", "/?lang=ru");
+    stubFetch({
+      "/api/i18n": { ok: true, json: REGISTRY },
+      "/api/i18n/ru": { ok: true, json: RU_DICT_PARTIAL },
+    });
+    render(<Probe tKey="common.app_title" />, { wrapper });
+    expect(screen.getByTestId("lang")).toHaveTextContent("ru");
+    await waitFor(() =>
+      expect(screen.getByTestId("t")).toHaveTextContent("опен-гео"),
+    );
+  });
+
+  it("lets ?lang= take precedence over a stored localStorage value", async () => {
+    localStorage.setItem("og-lang", "en");
+    window.history.replaceState({}, "", "/?lang=ru");
+    stubFetch({
+      "/api/i18n": { ok: true, json: REGISTRY },
+      "/api/i18n/ru": { ok: true, json: RU_DICT_PARTIAL },
+    });
+    render(<Probe tKey="common.app_title" />, { wrapper });
+    expect(screen.getByTestId("lang")).toHaveTextContent("ru");
+    await waitFor(() =>
+      expect(screen.getByTestId("t")).toHaveTextContent("опен-гео"),
+    );
+  });
+
+  it("falls back to the stored value when ?lang= is empty", async () => {
+    window.history.replaceState({}, "", "/?lang=");
+    localStorage.setItem("og-lang", "de");
+    stubFetch({
+      "/api/i18n": { ok: true, json: REGISTRY },
+      "/api/i18n/de": { ok: true, json: {} },
+    });
+    render(<Probe tKey="common.app_title" />, { wrapper });
+    expect(screen.getByTestId("lang")).toHaveTextContent("de");
+    await waitFor(() =>
+      expect(screen.getByTestId("locales")).toHaveTextContent("en,ru,de"),
+    );
+  });
+});
+
+
 describe("I18nProvider — default (English) state", () => {
   it("renders English immediately from the bundled dict with NO dict fetch", async () => {
     const fetchFn = stubFetch({ "/api/i18n": { ok: true, json: REGISTRY } });

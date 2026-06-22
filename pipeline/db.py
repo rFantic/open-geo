@@ -22,6 +22,39 @@ def get_conn(db_path: str = "data/aeo.db") -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _ensure_columns(
+    conn: sqlite3.Connection, table: str, columns: dict[str, str]
+) -> None:
+    existing = _table_columns(conn, table)
+    for name, decl in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def _ensure_results_unique_index(conn: sqlite3.Connection) -> None:
+    have = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' "
+        "AND name='idx_results_run_query_lens'"
+    ).fetchone()
+    if have is not None:
+        return
+    conn.execute(
+        "DELETE FROM results WHERE id NOT IN ("
+        "SELECT MIN(id) FROM results GROUP BY run_id, query, lens)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_results_run_query_lens "
+        "ON results(run_id, query, lens)"
+    )
+
+
+_METRICS_MIGRATION_COLUMNS = {"relative_citation": "REAL"}
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -61,13 +94,6 @@ def init_db(conn: sqlite3.Connection) -> None:
             sentiment                 TEXT
         );
 
-        -- NOTE: the metrics table schema CHANGED (relative_citation RE-ADDED;
-        -- it is valid because citations ⊆ sources, so the ratio is bounded).
-        -- Because this is CREATE TABLE IF NOT EXISTS, it will NOT alter an
-        -- existing table. Any DB created before this change must DROP the metrics
-        -- table and re-aggregate (metrics are derived from results — dropping
-        -- them causes NO data loss):
-        --     DROP TABLE IF EXISTS metrics;  -- then init_db + re-run pipeline.aggregate
         CREATE TABLE IF NOT EXISTS metrics (
             id                      INTEGER PRIMARY KEY,
             run_id                  INTEGER NOT NULL REFERENCES runs(id),
@@ -87,11 +113,23 @@ def init_db(conn: sqlite3.Connection) -> None:
             computed_at             TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS lens_sentiment (
+            id          INTEGER PRIMARY KEY,
+            run_id      INTEGER NOT NULL REFERENCES runs(id),
+            lens        TEXT NOT NULL,
+            summary     TEXT,
+            computed_at TEXT NOT NULL,
+            UNIQUE(run_id, lens)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_runs_brand_engine ON runs(brand_id, engine);
         CREATE INDEX IF NOT EXISTS idx_results_run        ON results(run_id);
         CREATE INDEX IF NOT EXISTS idx_metrics_run        ON metrics(run_id);
+        CREATE INDEX IF NOT EXISTS idx_lens_sentiment_run ON lens_sentiment(run_id);
         """
     )
+    _ensure_columns(conn, "metrics", _METRICS_MIGRATION_COLUMNS)
+    _ensure_results_unique_index(conn)
     conn.commit()
 
 
@@ -155,10 +193,64 @@ def update_run_counts(
     conn.commit()
 
 
+def get_captured_keys(
+    conn: sqlite3.Connection, run_id: int
+) -> set[tuple[str, str]]:
+    rows = conn.execute(
+        "SELECT query, lens FROM results WHERE run_id = ?", (run_id,)
+    ).fetchall()
+    return {(row["query"], row["lens"]) for row in rows}
+
+
+def find_unfinished_run(
+    conn: sqlite3.Connection, brand_id: int, engine: str
+) -> Optional[int]:
+    row = conn.execute(
+        "SELECT id FROM runs WHERE brand_id = ? AND engine = ? AND status = 'running' "
+        "ORDER BY run_at DESC, id DESC LIMIT 1",
+        (brand_id, engine),
+    ).fetchone()
+    return int(row["id"]) if row is not None else None
+
+
+def upsert_lens_sentiment(
+    conn: sqlite3.Connection,
+    run_id: int,
+    lens: str,
+    summary: Optional[str],
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO lens_sentiment (run_id, lens, summary, computed_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(run_id, lens) DO UPDATE SET
+            summary = excluded.summary,
+            computed_at = excluded.computed_at
+        """,
+        (run_id, lens, summary, _utcnow_iso()),
+    )
+    conn.commit()
+
+
+def get_lens_sentiments(conn: sqlite3.Connection, run_id: int) -> dict[str, str]:
+    try:
+        rows = conn.execute(
+            "SELECT lens, summary FROM lens_sentiment WHERE run_id = ?",
+            (run_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {row["lens"]: row["summary"] for row in rows if row["summary"] is not None}
+
+
 __all__ = [
     "get_conn",
     "init_db",
     "get_or_create_brand",
     "create_run",
     "update_run_counts",
+    "get_captured_keys",
+    "find_unfinished_run",
+    "upsert_lens_sentiment",
+    "get_lens_sentiments",
 ]

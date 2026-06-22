@@ -41,9 +41,9 @@
   <text x="74" y="278" font-size="20" fill="#93a0b1">Measure how visible your brand is inside</text>
   <text x="74" y="306" font-size="20" fill="#93a0b1">AI answers — sources, citations, sentiment.</text>
 
-  <text x="78" y="358" font-size="21" fill="#c4cfdb"><tspan fill="#34d399" font-weight="700">✓</tspan>  Google AI Overview capture</text>
+  <text x="78" y="358" font-size="21" fill="#c4cfdb"><tspan fill="#34d399" font-weight="700">✓</tspan>  Any AI engine: ChatGPT, Gemini, Perplexity…</text>
   <text x="78" y="398" font-size="21" fill="#c4cfdb"><tspan fill="#34d399" font-weight="700">✓</tspan>  Six-metric visibility funnel</text>
-  <text x="78" y="438" font-size="21" fill="#c4cfdb"><tspan fill="#34d399" font-weight="700">✓</tspan>  Dashboard + PDF — EN / RU</text>
+  <text x="78" y="438" font-size="21" fill="#c4cfdb"><tspan fill="#34d399" font-weight="700">✓</tspan>  Dashboard + PDF — EN · RU · ZH · AR</text>
 
   <rect x="72" y="492" width="452" height="56" rx="28" fill="#10182a" stroke="#2a3a57" stroke-width="1.5"/>
   <text x="98" y="527" font-size="18" fill="#34d399">▶</text>
@@ -54,12 +54,11 @@
   <circle cx="698" cy="122" r="6" fill="#febc2e"/>
   <circle cx="720" cy="122" r="6" fill="#28c840"/>
   <text x="752" y="127" font-size="13" font-weight="500" letter-spacing="0.5" fill="#6b7888" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">open-geo · run</text>
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16.5">
-    <text x="668" y="166"><tspan fill="#5f6c7e">$ </tspan><tspan fill="#34d399">/open-geo </tspan><tspan fill="#cdd7e3">questions.csv</tspan><tspan fill="#5f6c7e"> \</tspan></text>
-    <text x="700" y="192"><tspan fill="#d2a8ff">google </tspan><tspan fill="#6ea8fe">acme.com</tspan><tspan fill="#5f6c7e"> \</tspan></text>
-    <text x="700" y="218"><tspan fill="#8a97a9">--brand </tspan><tspan fill="#7ee787">"Acme"</tspan><tspan fill="#8a97a9"> --n-worker </tspan><tspan fill="#f0a868">3</tspan></text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="668" y="191" font-size="28"><tspan fill="#5f6c7e">$ </tspan><tspan fill="#34d399" font-weight="600">/open-geo</tspan></text>
+    <text x="668" y="224" font-size="14.5"><tspan fill="#6e7b8d"># one command · any AI engine · any brand</tspan></text>
   </g>
-  <text x="668" y="252" font-size="14.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"><tspan fill="#34d399">●</tspan><tspan fill="#6e7b8d"> dashboard ready · 6 metrics · 3 lenses</tspan></text>
+  <text x="668" y="257" font-size="14.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"><tspan fill="#34d399">●</tspan><tspan fill="#6e7b8d"> dashboard ready · 6 metrics · 3 lenses</tspan></text>
 
   <text x="648" y="324" font-size="13" font-weight="600" letter-spacing="2.5" fill="#6b7888">VISIBILITY FUNNEL</text>
   <g>

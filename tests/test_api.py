@@ -14,7 +14,7 @@ from pipeline.db import (
     update_run_counts,
 )
 
-ENGINE = "google_ai_overview"
+ENGINE = "google"
 
 _DELTA_METRICS = (
     "overview_coverage",
@@ -1225,3 +1225,108 @@ def test_report_missing_db_503(make_client, tmp_path):
         "/api/report", params={"brand_id": 1, "engine": ENGINE, "period": "all"}
     )
     assert resp.status_code == 503
+
+
+def _focus_done_run_id(db_path: str, brand_id: int) -> int:
+    conn = get_conn(db_path)
+    try:
+        return conn.execute(
+            "SELECT id FROM runs WHERE brand_id=? AND engine=? AND status='done' "
+            "ORDER BY run_at DESC, id DESC LIMIT 1",
+            (brand_id, ENGINE),
+        ).fetchone()["id"]
+    finally:
+        conn.close()
+
+
+def test_metrics_today_rows_carry_sentiment_summary_key(make_client, dash_fixture_db_path):
+    client = make_client(dash_fixture_db_path)
+    acme = _acme_id(client)
+    body = client.get(
+        "/api/metrics", params={"brand_id": acme, "engine": ENGINE, "period": "today"}
+    ).json()
+    assert body["metrics"]
+    for row in body["metrics"]:
+        assert "sentiment_summary" in row
+
+
+def test_metrics_today_sentiment_summary_value_attached(make_client, dash_fixture_db_path):
+    client = make_client(dash_fixture_db_path)
+    acme = _acme_id(client)
+    focus = _focus_done_run_id(dash_fixture_db_path, acme)
+
+    from pipeline.db import upsert_lens_sentiment
+
+    conn = get_conn(dash_fixture_db_path)
+    try:
+        upsert_lens_sentiment(conn, focus, "all", "overall neutral readout")
+        upsert_lens_sentiment(conn, focus, "branded", "owns branded queries")
+    finally:
+        conn.close()
+
+    body = client.get(
+        "/api/metrics", params={"brand_id": acme, "engine": ENGINE, "period": "today"}
+    ).json()
+    rows = {r["lens"]: r for r in body["metrics"]}
+    assert rows["all"]["sentiment_summary"] == "overall neutral readout"
+    assert rows["branded"]["sentiment_summary"] == "owns branded queries"
+    assert rows["general"]["sentiment_summary"] is None
+
+
+def test_metrics_all_rows_carry_sentiment_summary(make_client, dash_fixture_db_path):
+    client = make_client(dash_fixture_db_path)
+    acme = _acme_id(client)
+    focus = _focus_done_run_id(dash_fixture_db_path, acme)
+
+    from pipeline.db import upsert_lens_sentiment
+
+    conn = get_conn(dash_fixture_db_path)
+    try:
+        upsert_lens_sentiment(conn, focus, "all", "period rollup")
+    finally:
+        conn.close()
+
+    body = client.get(
+        "/api/metrics", params={"brand_id": acme, "engine": ENGINE, "period": "all"}
+    ).json()
+    rows = {r["lens"]: r for r in body["metrics"]}
+    for row in body["metrics"]:
+        assert "sentiment_summary" in row
+    assert rows["all"]["sentiment_summary"] == "period rollup"
+
+
+def _drop_lens_sentiment(db_path: str) -> None:
+    conn = get_conn(db_path)
+    try:
+        conn.execute("DROP TABLE IF EXISTS lens_sentiment")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_metrics_today_no_500_when_lens_sentiment_table_absent(make_client, dash_fixture_db_path):
+    _drop_lens_sentiment(dash_fixture_db_path)
+    client = make_client(dash_fixture_db_path)
+    acme = _acme_id(client)
+    resp = client.get(
+        "/api/metrics", params={"brand_id": acme, "engine": ENGINE, "period": "today"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["metrics"]
+    for row in body["metrics"]:
+        assert row["sentiment_summary"] is None
+
+
+def test_metrics_all_no_500_when_lens_sentiment_table_absent(make_client, dash_fixture_db_path):
+    _drop_lens_sentiment(dash_fixture_db_path)
+    client = make_client(dash_fixture_db_path)
+    acme = _acme_id(client)
+    resp = client.get(
+        "/api/metrics", params={"brand_id": acme, "engine": ENGINE, "period": "all"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["metrics"]
+    for row in body["metrics"]:
+        assert row["sentiment_summary"] is None

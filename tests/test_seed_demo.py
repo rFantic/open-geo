@@ -527,7 +527,7 @@ def test_build_sources_other_domains_drawn_from_pool():
 def test_make_capture_preserves_unicode_query_and_engine():
     cap = _mk(0, query="матрас 床 🛏 best?", overview_present=False)
     assert cap.query == "матрас 床 🛏 best?"
-    assert cap.engine == sd.ENGINE == "google_ai_overview"
+    assert cap.engine == sd.ENGINE == "google"
 
 
 def test_make_capture_lens_is_passed_through():
@@ -792,3 +792,58 @@ def test_seed_reuse_same_path_without_reset_appends_more_runs(tmp_path):
     assert out2["counts"]["runs"] == 10
     assert out2["counts"]["results"] == 240
     assert out2["latest_run_id"] == 10
+
+
+def test_seed_writes_lens_sentiment_rows_per_run(tmp_path):
+    p = tmp_path / "ls.db"
+    sd.seed(str(p), reset=True)
+    conn = sqlite3.connect(p)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT run_id, lens, summary FROM lens_sentiment ORDER BY run_id, lens"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 5 * 4
+    for r in rows:
+        assert r["summary"]
+    per_run = {}
+    for r in rows:
+        per_run.setdefault(r["run_id"], set()).add(r["lens"])
+    for lenses in per_run.values():
+        assert lenses == {"general", "branded", "comparative", "all"}
+
+
+def test_seed_lens_sentiment_loadable_via_helper(tmp_path):
+    from pipeline.db import get_conn, get_lens_sentiments
+
+    p = tmp_path / "ls2.db"
+    out = sd.seed(str(p), reset=True)
+    run_id = out["latest_run_id"]
+    conn = get_conn(str(p))
+    try:
+        got = get_lens_sentiments(conn, run_id)
+    finally:
+        conn.close()
+    assert set(got) == {"general", "branded", "comparative", "all"}
+    assert got["all"] == sd._LENS_SUMMARIES["all"]
+    assert got["branded"] == sd._LENS_SUMMARIES["branded"]
+
+
+def test_seed_lens_sentiment_deterministic_across_two_dbs(tmp_path):
+    p1 = tmp_path / "ls_a.db"
+    p2 = tmp_path / "ls_b.db"
+    sd.seed(str(p1), reset=True)
+    sd.seed(str(p2), reset=True)
+
+    def _rows(db_path):
+        conn = sqlite3.connect(db_path)
+        try:
+            return conn.execute(
+                "SELECT run_id, lens, summary FROM lens_sentiment ORDER BY run_id, lens"
+            ).fetchall()
+        finally:
+            conn.close()
+
+    assert _rows(str(p1)) == _rows(str(p2))

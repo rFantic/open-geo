@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import warnings
 
 import pytest
 from reportlab.lib.pagesizes import A4
@@ -41,11 +42,12 @@ from report.generate import (
     render_lenses,
     render_sentiment,
 )
-from report.i18n import Translator
+from report.i18n import DEFAULT_LANG, Translator
+from report.textshape import is_rtl, shape, shaping_available
 
 BRAND = "Acme"
 DOMAIN = "acme.com"
-ENGINE = "google_ai_overview"
+ENGINE = "google"
 
 PNG_MAGIC = b"\x89PNG"
 PDF_MAGIC = b"%PDF"
@@ -398,6 +400,49 @@ def test_render_sentiment_with_data():
     render_sentiment(doc, _en(), _report_data())
 
 
+def test_render_sentiment_renders_lens_and_all_lead_lines():
+    doc = _doc()
+    doc.fill_background()
+    y0 = doc.y
+    data = _report_data(
+        sentiment_summaries={
+            "all": "Visible across lenses, neutral overall.",
+            "general": "Mostly neutral among alternatives.",
+            "branded": "Owns its branded queries.",
+        }
+    )
+    render_sentiment(doc, _en(), data)
+    assert doc.y < y0
+
+
+def test_render_sentiment_all_summary_without_per_query_snippets():
+    doc = _doc()
+    doc.fill_background()
+    data = _report_data(
+        sentiments={},
+        sentiment_summaries={"all": "Overall qualitative rollup line."},
+    )
+    render_sentiment(doc, _en(), data)
+
+
+def test_render_sentiment_long_summary_wraps_without_error():
+    doc = _doc()
+    doc.fill_background()
+    long_line = "this lens was treated in a verbose qualitative way " * 8
+    data = _report_data(
+        sentiment_summaries={"all": long_line, "general": long_line}
+    )
+    render_sentiment(doc, _en(), data)
+    assert doc.y <= PAGE_H - MARGIN
+
+
+def test_render_sentiment_no_summaries_still_renders_snippets():
+    doc = _doc()
+    doc.fill_background()
+    data = _report_data(sentiment_summaries={})
+    render_sentiment(doc, _en(), data)
+
+
 def test_render_sentiment_empty_branch():
     doc = _doc()
     doc.fill_background()
@@ -448,7 +493,7 @@ def test_install_footer_hook_wraps_new_page():
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "period,lang",
-    [("today", "en"), ("all", "en"), ("all", "ru")],
+    [("today", "en"), ("all", "en"), ("all", "ru"), ("all", "zh"), ("today", "ar"), ("all", "ar")],
 )
 def test_build_pdf_writes_pdf(tmp_path, period, lang):
     data = _report_data(
@@ -749,6 +794,148 @@ def test_render_cover_is_single_page_and_anchors_footer():
     render_cover(doc, _en(), _report_data(period="today"), datetime(2026, 6, 18, 9, 0))
     assert doc.c.getPageNumber() == page0
     assert doc.y == pytest.approx(MARGIN + 6 * 2.834645669, abs=1.0)
+
+
+def test_shaping_libs_available():
+    assert shaping_available() is True
+
+
+def test_is_rtl_classifies_arabic_only():
+    assert is_rtl("ar") is True
+    assert is_rtl("en") is False
+    assert is_rtl("ru") is False
+    assert is_rtl("zh") is False
+    assert is_rtl(None) is False
+
+
+def test_shape_transforms_arabic_and_is_identity_otherwise():
+    src = "العربية"
+    out = shape(src, "ar")
+    assert out != src
+    assert any(0xFB50 <= ord(ch) <= 0xFEFF for ch in out)
+    assert shape(src, "en") == src
+    assert shape(src, "zh") == src
+    assert shape(src, None) == src
+    assert shape("", "ar") == ""
+
+
+def test_shape_leaves_latin_digits_untouched_under_ar():
+    assert shape("acme.com", "ar") == "acme.com"
+    assert shape("83%", "ar") == "83%"
+
+
+def test_register_fonts_selects_cjk_for_zh():
+    register_fonts("zh")
+    try:
+        assert G.FONT == "NotoSansSC"
+        assert G.FONT_BOLD == "NotoSansSC-Bold"
+        assert G.FONT_OBLIQUE == "NotoSansSC"
+        names = pdfmetrics.getRegisteredFontNames()
+        assert "NotoSansSC" in names and "NotoSansSC-Bold" in names
+        assert G.plt.rcParams["font.family"] == ["Noto Sans SC", "DejaVu Sans"]
+    finally:
+        register_fonts(DEFAULT_LANG)
+
+
+def test_register_fonts_selects_arabic_for_ar():
+    register_fonts("ar")
+    try:
+        assert G.FONT == "NotoNaskhArabic"
+        assert G.FONT_BOLD == "NotoNaskhArabic-Bold"
+        assert G.plt.rcParams["font.family"] == ["Noto Naskh Arabic", "DejaVu Sans"]
+    finally:
+        register_fonts(DEFAULT_LANG)
+
+
+def test_register_fonts_dejavu_for_en_and_ru():
+    for lang in ("en", "ru"):
+        register_fonts(lang)
+        assert G.FONT == "DejaVuSans"
+        assert G.FONT_BOLD == "DejaVuSans-Bold"
+        assert G.FONT_OBLIQUE == "DejaVuSans-Oblique"
+        assert G.plt.rcParams["font.family"] == ["DejaVu Sans"]
+
+
+def test_register_fonts_falls_back_to_dejavu_when_bundled_fonts_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(G, "_FONTS_DIR", str(tmp_path / "no_fonts_here"))
+    register_fonts("zh")
+    try:
+        assert G.FONT == "DejaVuSans"
+        assert G.plt.rcParams["font.family"] == ["DejaVu Sans"]
+    finally:
+        monkeypatch.undo()
+        register_fonts(DEFAULT_LANG)
+
+
+@pytest.mark.slow
+def test_build_pdf_zh_emits_no_missing_glyph_warnings(tmp_path):
+    data = _report_data(
+        period="all",
+        history=[
+            ("2026-05-12T09:00:00Z", {"all": _lm("all")}),
+            ("2026-05-19T09:00:00Z", {"all": _lm("all", overview_coverage=0.9)}),
+        ],
+    )
+    out = tmp_path / "zh.pdf"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        build_pdf(data, str(out), lang="zh")
+    missing = [w for w in caught if "missing from font" in str(w.message).lower()]
+    assert not missing, [str(w.message) for w in missing[:5]]
+    assert out.read_bytes()[:4] == PDF_MAGIC
+    register_fonts(DEFAULT_LANG)
+
+
+@pytest.mark.slow
+def test_build_pdf_zh_embeds_cjk_font(tmp_path):
+    out = tmp_path / "zh.pdf"
+    build_pdf(_report_data(period="today"), str(out), lang="zh")
+    raw = out.read_bytes()
+    assert raw[:4] == PDF_MAGIC
+    assert b"NotoSansSC" in raw
+    register_fonts(DEFAULT_LANG)
+
+
+@pytest.mark.slow
+def test_build_pdf_ar_embeds_arabic_font(tmp_path):
+    out = tmp_path / "ar.pdf"
+    build_pdf(_report_data(period="today"), str(out), lang="ar")
+    raw = out.read_bytes()
+    assert raw[:4] == PDF_MAGIC
+    assert b"NotoNaskhArabic" in raw
+    register_fonts(DEFAULT_LANG)
+
+
+@pytest.mark.slow
+def test_build_pdf_en_does_not_embed_noto_fonts(tmp_path):
+    out = tmp_path / "en.pdf"
+    build_pdf(_report_data(period="all", history=[
+        ("2026-05-12T09:00:00Z", {"all": _lm("all")}),
+        ("2026-05-19T09:00:00Z", {"all": _lm("all", overview_coverage=0.9)}),
+    ]), str(out), lang="en")
+    raw = out.read_bytes()
+    assert b"DejaVuSans" in raw
+    assert b"NotoSansSC" not in raw
+    assert b"NotoNaskhArabic" not in raw
+
+
+@pytest.mark.slow
+def test_build_pdf_ar_is_rtl_and_shapes_via_canvas(tmp_path):
+    data = _report_data(period="today")
+    doc_seen = {}
+    original = G.Doc
+
+    def spy(c, rtl=False):
+        doc_seen["rtl"] = rtl
+        return original(c, rtl=rtl)
+
+    G.Doc = spy
+    try:
+        build_pdf(data, str(tmp_path / "ar.pdf"), lang="ar")
+    finally:
+        G.Doc = original
+        register_fonts(DEFAULT_LANG)
+    assert doc_seen.get("rtl") is True
 
 
 if __name__ == "__main__":  # pragma: no cover

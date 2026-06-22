@@ -20,7 +20,9 @@ The **capture agent** drives an engine (e.g. Google AI Overview) for one
 `(query, lens)` and emits **one `QueryCapture` JSON object per query**, which it
 **returns to the orchestrator** — a capture agent never writes to the database
 itself. The **orchestrator** collects the per-query objects into a **JSON array**
-and feeds that batch to the ingest CLI on STDIN.
+and feeds it to the ingest CLI on STDIN — **per worker chunk, as each returns**
+(incremental durability, §2.1), not one batch at the very end. Ingest is
+**idempotent** on `(run_id, query, lens)`, so retries/resumes never duplicate rows.
 
 Canonical model: `pipeline/schema.py :: QueryCapture` (pydantic v2). Ingest
 validates every object against it.
@@ -109,8 +111,11 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 - **Location:** `data/aeo.db` (relative to repo root). Opened via
   `pipeline.db.get_conn(db_path="data/aeo.db")`, which sets
   `PRAGMA journal_mode=WAL;` and `PRAGMA foreign_keys=ON;`.
-- **Schema creation:** `pipeline.db.init_db(conn)` — idempotent
-  (`CREATE TABLE IF NOT EXISTS`). Safe to call on every startup.
+- **Schema creation / forward-migration:** `pipeline.db.init_db(conn)` — idempotent.
+  Creates tables (`CREATE TABLE IF NOT EXISTS`) **and adds any column missing from an
+  existing table** (`ALTER TABLE … ADD COLUMN`; currently `metrics.relative_citation`).
+  Safe to call on every startup: it both initializes a fresh DB and forward-migrates an
+  older one in place (existing rows read `NULL` for a newly added column until re-aggregated).
 - Arrays / nested objects are stored as **JSON strings** in `*_json` columns.
 
 ### Tables
@@ -157,6 +162,16 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 | `brand_in_answer_text` | INTEGER | 0/1 |
 | `sentiment` | TEXT | qualitative text or NULL |
 
+> **Capture identity / idempotency.** `(run_id, query, lens)` is the identity of a
+> capture within a run, enforced by `UNIQUE INDEX idx_results_run_query_lens ON
+> results(run_id, query, lens)`. Re-ingesting the same `(run_id, query, lens)` is a
+> **safe no-op** (`INSERT … ON CONFLICT DO NOTHING`) — this is what makes
+> incremental ingest and resume (§2.1) idempotent (no duplicate rows, no metric
+> drift). A DB created before this index **self-heals** on the next `init_db`: it
+> de-duplicates any pre-existing `(run_id, query, lens)` collisions (keeping the
+> lowest `id`) and then creates the unique index — no manual step, no data loss
+> beyond the redundant duplicates.
+
 **`metrics`** (one row per lens + one `lens="all"` aggregate row per run)
 
 | column | type | notes |
@@ -181,13 +196,37 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 > **Schema change / migration:** `relative_citation` was **RE-ADDED** (reversing
 > its earlier removal — it is valid because citations ⊆ sources, so the ratio is
 > bounded; see §4). `visibility_in_citations` and `avg_citation_position` remain.
-> Since `init_db` uses `CREATE TABLE IF NOT EXISTS`, DBs created before this
-> change must `DROP TABLE IF EXISTS metrics;` then re-run `pipeline.aggregate`
-> (metrics are derived from `results` — no data loss).
+> A DB created before this column **self-heals automatically**: `init_db` adds the
+> missing `metrics.relative_citation` via `ALTER TABLE … ADD COLUMN` on the next
+> startup — **no manual `DROP`, no data loss** (existing rows read `NULL` until the
+> run is re-aggregated; `pipeline.aggregate` re-`DELETE`s + re-`INSERT`s a run's
+> rows, so the value populates on the next aggregate).
 >
 > **Filename note:** `aeo.db` is a **historical filename** (the project is now
 > *open-geo* / GEO); it is kept as-is for compatibility and carries no meaning
 > beyond "the working SQLite DB".
+
+**`lens_sentiment`** (one row per lens — incl. `lens="all"` — per run; the **orchestrator-written qualitative synthesis**, decoupled from `metrics`)
+
+| column | type | notes |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `run_id` | INTEGER | FK → `runs(id)` |
+| `lens` | TEXT | a specific lens, or `"all"` for the cross-lens synthesis |
+| `summary` | TEXT \| NULL | short **qualitative** synthesis of that lens's per-query `sentiment`s; `NULL` = no data (brand absent across the whole lens) |
+| `computed_at` | TEXT | ISO-8601 |
+| — | | `UNIQUE(run_id, lens)` |
+
+> **Who writes it:** the **orchestrator** (skill), at finalize, via
+> `python -m pipeline.lens_sentiment` (§3.4) — **NOT** `pipeline.aggregate` (which stays
+> deterministic math and `DELETE`s+rebuilds `metrics`). This table is intentionally **separate
+> from `metrics`** so re-aggregation never clobbers the synthesized prose. It is **qualitative**
+> (free text) — consistent with §4's "no numeric sentiment": a per-lens text roll-up, **not** a
+> score, index, or share-of-voice.
+>
+> **New table / migration:** `init_db` creates it (`CREATE TABLE IF NOT EXISTS`). The read-only
+> dashboard API does **not** call `init_db`, so against a DB created before this change it MUST
+> treat a missing `lens_sentiment` as "no summaries" (catch `no such table`), never error.
 
 ### DB helpers provided by `pipeline/db.py`
 
@@ -196,6 +235,29 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 - `get_or_create_brand(conn, name, domain) -> int` (normalizes `domain`)
 - `create_run(conn, brand_id, engine) -> int` (status `'running'`)
 - `update_run_counts(conn, run_id, n_queries=?, n_ok=?, n_failed=?, status=?) -> None`
+- `upsert_lens_sentiment(conn, run_id, lens, summary) -> None` (replaces the row for that `run_id`+`lens`; `summary=None` clears it)
+- `get_lens_sentiments(conn, run_id) -> dict[str, str]` (lens → summary; returns `{}` if the `lens_sentiment` table is absent)
+- `get_captured_keys(conn, run_id) -> set[tuple[str, str]]` (the `(query, lens)` pairs already in `results` for the run — the resume diff source)
+- `find_unfinished_run(conn, brand_id, engine) -> int | None` (most recent `status='running'` run for that brand+engine — the crashed run to resume, or `None`)
+
+### 2.1 Run lifecycle, incremental ingest & resume
+
+A run moves `running → done` (or `failed`); **only the orchestrator finalizes it**
+(SKILL STEP 4.2). Capture data is made durable **incrementally**, so a crash
+mid-run never loses already-captured work:
+
+- **Incremental ingest** — the orchestrator ingests **each worker's chunk the
+  moment it returns**, not one batch at the very end. Every accepted `QueryCapture`
+  is committed to `results` immediately; `ingest` keeps `runs.n_ok` at the live
+  cumulative `COUNT(results for run)` and leaves `status='running'`.
+- **Idempotency** — `(run_id, query, lens)` is unique and inserts are
+  `ON CONFLICT DO NOTHING`, so re-sending a chunk (retry / overlap / resume) never
+  duplicates rows or inflates metrics.
+- **Resume** — a crashed run stays `status='running'` and is located via
+  `find_unfinished_run(brand_id, engine)`. The orchestrator reads what is already
+  captured (`get_captured_keys(run_id)`) and **re-dispatches only the missing
+  `(query, lens)` rows** (CSV minus captured) into the **same** run, then finalizes
+  (`status='done'`) once nothing is missing.
 
 ---
 
@@ -215,23 +277,31 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 
 - Reads a JSON **array** of `QueryCapture` objects from STDIN.
 - Validates **each** object against `pipeline.schema.QueryCapture`.
-- Writes every **valid** row to `results` (serializing arrays to the `*_json`
-  columns). **Invalid rows do NOT abort the batch** — they are collected into
-  `errors` so the **orchestrator** can fix and re-send (re-capturing via the
-  relevant worker if needed).
-- Should update run counters (`n_queries`, `n_ok`, `n_failed`) via
-  `update_run_counts`.
+- Writes every **valid** row to `results` **idempotently** — `INSERT … ON
+  CONFLICT(run_id, query, lens) DO NOTHING`: a row whose `(run_id, query, lens)` is
+  already present is **skipped** (no duplicate, no metric drift), not rewritten.
+  **Invalid rows do NOT abort the batch** — they are collected into `errors` so the
+  **orchestrator** can fix and re-send (re-capturing via the relevant worker).
+- Updates **only** `runs.n_ok`, to the live cumulative `COUNT(results for run)`. It
+  does **NOT** set `n_queries`, `n_failed`, or `status` — the run stays
+  `status='running'` until the **orchestrator** finalizes it (SKILL STEP 4.2 /
+  §2.1). This is what lets one run be ingested **incrementally** (chunk by chunk, as
+  workers return) and **resumed** after a crash.
 - **STDOUT:**
   ```json
   {
     "run_id": N,
     "ok": [0, 1, 3],
+    "skipped": [4],
     "errors": [
       { "index": 2, "query": "<query or null>", "field": "<field path>", "msg": "<validation message>" }
     ]
   }
   ```
-  - `ok` = indices (0-based, by position in the input array) of rows written.
+  - `ok` = indices (0-based, by position in the input array) of rows **newly
+    written** by this call.
+  - `skipped` = indices of **valid** rows whose `(run_id, query, lens)` was
+    **already present** (idempotent no-op — e.g. a retry or a resume overlap).
   - `errors` = one entry per rejected row; `index` is its position in the input
     array, `field`/`msg` come from the pydantic `ValidationError` (first error is
     sufficient). `query` echoes the offending object's `query` if present, else
@@ -261,6 +331,19 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
   ```
 - A lens row is emitted only for lenses present in the run's results; the `all`
   row is always emitted.
+
+### 3.4 `python -m pipeline.lens_sentiment --run-id <N>`  (JSON object `{lens: summary}` on STDIN)
+
+- Reads a JSON **object** mapping `lens` → `summary` from STDIN, e.g.
+  `{"all": "...", "general": "...", "branded": "...", "comparative": "..."}`. Keys are a
+  subset of `{general, branded, comparative, all}`; `summary` is a string, or `null` to clear.
+  Only provided lenses are written.
+- **Upserts** into `lens_sentiment` (§2) — one row per `run_id`+`lens` (`UNIQUE(run_id, lens)`),
+  stamping `computed_at`. This is how the **orchestrator** persists the per-lens **qualitative
+  synthesis** it writes at finalize (SKILL STEP 5b); the deterministic `pipeline.aggregate`
+  (§3.3) never touches this table.
+- **STDOUT:** `{"run_id": N, "written": ["all", "general", ...]}` — lenses written, in input order.
+- Unknown `run_id` → message on STDERR, exit 1 (STDOUT carries the JSON only on success).
 
 ---
 
@@ -329,9 +412,21 @@ Notes:
   artifact; capture now folds cited links into `sources`, so the funnel is
   well-defined.)
 - **`sentiment` is QUALITATIVE** (free text, per query in `results.sentiment`).
-  It is **NOT** aggregated into any numeric metric. Report and dashboard read it
-  directly per query. There is intentionally **no composite index, no
-  share-of-voice, and no competitor modeling** in v1.
+  It is **NOT** aggregated into any *numeric* metric — there is intentionally **no
+  composite index, no share-of-voice, and no competitor modeling** in v1.
+  **However**, the **orchestrator** additionally writes a per-lens **qualitative
+  synthesis**: one short sentence per lens (and `all`) summarizing that lens's
+  per-query `sentiment`s, stored in the `lens_sentiment` table (§2) at finalize via
+  `pipeline.lens_sentiment` (§3.4). This stays **text, not a number**, so it does not
+  break the "no numeric" rule — it is a readout, not a score. Dashboard and report read
+  **both**: the per-query `sentiment` (results table / sentiment section) **and** the
+  per-lens `summary` (the dashboard's per-lens sentiment cards + the report's sentiment
+  section lead).
+  **Synthesis rules (orchestrator).** Summarize ONLY what the per-query `sentiment`
+  strings of that lens actually say — never invent ranks, competitors, numbers, or
+  praise; ~1 neutral sentence. It is **data, so it follows the language of the captured
+  sentiments, not `--lang`**. If the brand appeared in no query of the lens, write `null`
+  (the UI then shows a "not mentioned" fallback).
 
 ### 4.1 Deltas (computed at read-time, NOT stored)
 

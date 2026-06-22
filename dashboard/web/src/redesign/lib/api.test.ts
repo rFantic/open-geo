@@ -164,22 +164,22 @@ describe("qs querystring builder (via api methods)", () => {
   it("includes string values", async () => {
     const fn = stubFetch(okResponse({}));
 
-    await api.timeseries(7, "google_ai_overview", "branded");
+    await api.timeseries(7, "google", "branded");
 
     expect(fetchedUrl(fn)).toBe(
-      u("/api/timeseries?brand_id=7&engine=google_ai_overview&lens=branded"),
+      u("/api/timeseries?brand_id=7&engine=google&lens=branded"),
     );
   });
 
   it("joins multiple present params with & and prefixes a single ?", async () => {
     const fn = stubFetch(okResponse({}));
 
-    await api.metrics(7, "google_ai_overview", "today", "general");
+    await api.metrics(7, "google", "today", "general");
 
     const url = fetchedUrl(fn);
     expect(url.match(/\?/g)).toHaveLength(1);
     expect(url).toBe(
-      u("/api/metrics?brand_id=7&engine=google_ai_overview&period=today&lens=general"),
+      u("/api/metrics?brand_id=7&engine=google&period=today&lens=general"),
     );
   });
 
@@ -223,11 +223,11 @@ describe("api method request paths", () => {
     expect(fetchedUrl(fn)).toBe(u("/api/runs?brand_id=7"));
   });
 
-  it("runs(7, 'google_ai_overview') -> /api/runs?brand_id=7&engine=google_ai_overview", async () => {
+  it("runs(7, 'google') -> /api/runs?brand_id=7&engine=google", async () => {
     const fn = stubFetch(okResponse([]));
-    await api.runs(7, "google_ai_overview");
+    await api.runs(7, "google");
     expect(fetchedUrl(fn)).toBe(
-      u("/api/runs?brand_id=7&engine=google_ai_overview"),
+      u("/api/runs?brand_id=7&engine=google"),
     );
   });
 
@@ -285,8 +285,8 @@ describe("reportUrl", () => {
   it("builds the URL for the 'today' period too", () => {
     stubFetch(okResponse({}));
 
-    expect(api.reportUrl(42, "google_ai_overview", "today")).toBe(
-      u("/api/report?brand_id=42&engine=google_ai_overview&period=today"),
+    expect(api.reportUrl(42, "google", "today")).toBe(
+      u("/api/report?brand_id=42&engine=google&period=today"),
     );
   });
 

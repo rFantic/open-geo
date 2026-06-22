@@ -38,6 +38,6 @@ match. Check these pairs:
 
 ## Rules
 - Report-only by default. `--fix` edits docs, not code.
-- Never "fix" intentional exceptions noted in CLAUDE.md gotchas (e.g. the seed/test layer
-  staying on `google_ai_overview`; the annotated `dashboard/README.md` curl probe).
+- Never "fix" intentional exceptions noted in CLAUDE.md gotchas. Read the current gotcha
+  list first; an "exception" only counts if a gotcha still names it.
 - Run Python via `.venv/bin/python` from the repo root.

@@ -28,6 +28,7 @@ export type MetricRow = {
   avg_source_position: Num;
   avg_citation_position: Num;
   relative_citation: Num;
+  sentiment_summary?: string | null;
   overview_coverage_delta?: Num;
   visibility_in_sources_delta?: Num;
   visibility_in_citations_delta?: Num;

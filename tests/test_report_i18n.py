@@ -343,6 +343,38 @@ def test_every_registered_code_builds_complete_translator():
         assert val and val != "report.section_kpi"
 
 
+def test_zh_and_ar_have_identical_key_sets_to_en():
+    zh = _flatten_ref(_load("zh.json"))
+    ar = _flatten_ref(_load("ar.json"))
+    assert set(zh) == set(EN_FLAT)
+    assert set(ar) == set(EN_FLAT)
+
+
+def test_no_registered_locale_has_keys_outside_en_contract():
+    en_keys = set(EN_FLAT)
+    for code in available_codes():
+        flat = _flatten_ref(_load(f"{code}.json"))
+        extra = set(flat) - en_keys
+        assert not extra, f"{code}.json has keys not in en.json: {sorted(extra)}"
+
+
+def test_zh_ar_are_translated_with_brand_nouns_kept_verbatim():
+    zh = _flatten_ref(_load("zh.json"))
+    ar = _flatten_ref(_load("ar.json"))
+    assert zh["common.app_subtitle"] != EN_FLAT["common.app_subtitle"]
+    assert ar["common.app_subtitle"] != EN_FLAT["common.app_subtitle"]
+    for loc in (zh, ar):
+        assert loc["common.app_title"] == "open-geo"
+        assert loc["report.cover_brandline"] == EN_FLAT["report.cover_brandline"]
+        assert loc["dashboard.footer"] == EN_FLAT["dashboard.footer"]
+
+
+def test_zh_ar_registered_in_locales_with_native_names():
+    by_code = {e["code"]: e["name"] for e in available_languages()}
+    assert by_code["zh"] == "中文"
+    assert by_code["ar"] == "العربية"
+
+
 def test_t_ru_placeholder_substitution_uses_russian_template():
     t = Translator("ru")
     out = t.t("report.card_coverage_sub", n_overviews=3, n_queries=5)

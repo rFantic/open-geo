@@ -11,7 +11,7 @@ from pipeline.ingest import insert_capture
 from pipeline.schema import Link, QueryCapture
 
 FIXTURE_DB = "data/_fixture_dash.db"
-ENGINE = "google_ai_overview"
+ENGINE = "google"
 
 
 def _iso(dt: datetime) -> str:

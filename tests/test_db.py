@@ -8,10 +8,14 @@ import pytest
 from pipeline.db import (
     _utcnow_iso,
     create_run,
+    find_unfinished_run,
+    get_captured_keys,
     get_conn,
+    get_lens_sentiments,
     get_or_create_brand,
     init_db,
     update_run_counts,
+    upsert_lens_sentiment,
 )
 
 
@@ -221,7 +225,7 @@ def test_get_or_create_brand_same_name_different_domain_is_distinct(empty_conn):
 
 def test_create_run_inserts_running_with_defaults(empty_conn):
     bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
-    run_id = create_run(empty_conn, bid, "google_ai_overview")
+    run_id = create_run(empty_conn, bid, "google")
     assert isinstance(run_id, int)
 
     row = empty_conn.execute(
@@ -230,7 +234,7 @@ def test_create_run_inserts_running_with_defaults(empty_conn):
         (run_id,),
     ).fetchone()
     assert row["brand_id"] == bid
-    assert row["engine"] == "google_ai_overview"
+    assert row["engine"] == "google"
     assert row["status"] == "running"
     assert row["run_at"]
     datetime.fromisoformat(row["run_at"])
@@ -239,14 +243,14 @@ def test_create_run_inserts_running_with_defaults(empty_conn):
 
 def test_create_run_multiple_runs_get_distinct_ids(empty_conn):
     bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
-    r1 = create_run(empty_conn, bid, "google_ai_overview")
-    r2 = create_run(empty_conn, bid, "google_ai_overview")
+    r1 = create_run(empty_conn, bid, "google")
+    r2 = create_run(empty_conn, bid, "google")
     assert r1 != r2
 
 
 def _fresh_run(conn: sqlite3.Connection) -> int:
     bid = get_or_create_brand(conn, "Acme", "acme.com")
-    return create_run(conn, bid, "google_ai_overview")
+    return create_run(conn, bid, "google")
 
 
 def _run_row(conn: sqlite3.Connection, run_id: int) -> sqlite3.Row:
@@ -405,14 +409,14 @@ def test_get_conn_foreign_keys_enforced_not_just_reported(empty_conn):
         empty_conn.execute(
             "INSERT INTO runs (brand_id, engine, run_at, status) "
             "VALUES (?, ?, ?, 'running')",
-            (999_999, "google_ai_overview", _utcnow_iso()),
+            (999_999, "google", _utcnow_iso()),
         )
         empty_conn.commit()
 
 
 def test_init_db_second_call_preserves_existing_rows(empty_conn):
     bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
-    rid = create_run(empty_conn, bid, "google_ai_overview")
+    rid = create_run(empty_conn, bid, "google")
     init_db(empty_conn)
     assert empty_conn.execute("SELECT COUNT(*) FROM brands").fetchone()[0] == 1
     assert empty_conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 1
@@ -428,7 +432,7 @@ def test_init_db_runs_table_sql_defaults_match_contract(empty_conn):
     bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
     cur = empty_conn.execute(
         "INSERT INTO runs (brand_id, engine, run_at) VALUES (?, ?, ?)",
-        (bid, "google_ai_overview", _utcnow_iso()),
+        (bid, "google", _utcnow_iso()),
     )
     empty_conn.commit()
     row = empty_conn.execute(
@@ -491,7 +495,7 @@ def test_get_or_create_brand_returns_int_for_existing_row_branch(empty_conn):
 
 def test_get_or_create_brand_id_is_valid_runs_fk_target(empty_conn):
     bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
-    rid = create_run(empty_conn, bid, "google_ai_overview")
+    rid = create_run(empty_conn, bid, "google")
     linked = empty_conn.execute(
         "SELECT brand_id FROM runs WHERE id = ?", (rid,)
     ).fetchone()["brand_id"]
@@ -510,12 +514,12 @@ def test_get_or_create_brand_created_at_is_utc_aware(empty_conn):
 
 def test_create_run_bogus_brand_id_raises_foreign_key(empty_conn):
     with pytest.raises(sqlite3.IntegrityError):
-        create_run(empty_conn, 4242, "google_ai_overview")
+        create_run(empty_conn, 4242, "google")
 
 
 def test_create_run_run_at_is_utc_aware(empty_conn):
     bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
-    rid = create_run(empty_conn, bid, "google_ai_overview")
+    rid = create_run(empty_conn, bid, "google")
     ts = empty_conn.execute(
         "SELECT run_at FROM runs WHERE id = ?", (rid,)
     ).fetchone()["run_at"]
@@ -616,3 +620,331 @@ def test_update_run_counts_noop_issues_no_write_on_fresh_run(empty_conn):
         0,
         0,
     )
+
+
+def test_init_db_migrates_legacy_metrics_adds_relative_citation(tmp_path):
+    conn = get_conn(str(tmp_path / "legacy.db"))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE metrics (
+                id                      INTEGER PRIMARY KEY,
+                run_id                  INTEGER,
+                brand_id                INTEGER,
+                engine                  TEXT,
+                lens                    TEXT,
+                n_queries               INTEGER,
+                n_overviews             INTEGER,
+                overview_coverage       REAL,
+                n_in_sources            INTEGER,
+                visibility_in_sources   REAL,
+                n_cited                 INTEGER,
+                visibility_in_citations REAL,
+                avg_source_position     REAL,
+                avg_citation_position   REAL,
+                computed_at             TEXT
+            );
+            """
+        )
+        conn.commit()
+        assert "relative_citation" not in _columns(conn, "metrics")
+        init_db(conn)
+        assert "relative_citation" in _columns(conn, "metrics")
+    finally:
+        conn.close()
+
+
+def test_init_db_migration_preserves_existing_metrics_rows(tmp_path):
+    conn = get_conn(str(tmp_path / "legacy_rows.db"))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE metrics (
+                id                      INTEGER PRIMARY KEY,
+                run_id                  INTEGER,
+                lens                    TEXT,
+                visibility_in_citations REAL,
+                computed_at             TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO metrics (run_id, lens, visibility_in_citations, computed_at) "
+            "VALUES (?, ?, ?, ?)",
+            (1, "all", 0.5, _utcnow_iso()),
+        )
+        conn.commit()
+        init_db(conn)
+        row = conn.execute(
+            "SELECT lens, visibility_in_citations, relative_citation FROM metrics"
+        ).fetchone()
+        assert row["lens"] == "all"
+        assert row["visibility_in_citations"] == 0.5
+        assert row["relative_citation"] is None
+    finally:
+        conn.close()
+
+
+def test_init_db_migration_idempotent_no_duplicate_column(empty_conn):
+    init_db(empty_conn)
+    init_db(empty_conn)
+    names = [r[1] for r in empty_conn.execute("PRAGMA table_info(metrics)")]
+    assert names.count("relative_citation") == 1
+
+
+def test_init_db_creates_lens_sentiment_table(empty_conn):
+    assert "lens_sentiment" in _table_names(empty_conn)
+
+
+def test_lens_sentiment_table_full_column_set(empty_conn):
+    assert _columns(empty_conn, "lens_sentiment") == {
+        "id",
+        "run_id",
+        "lens",
+        "summary",
+        "computed_at",
+    }
+
+
+def test_init_db_creates_lens_sentiment_index(empty_conn):
+    assert "idx_lens_sentiment_run" in _index_names(empty_conn)
+
+
+def _seeded_run(conn: sqlite3.Connection) -> int:
+    bid = get_or_create_brand(conn, "Acme", "acme.com")
+    return create_run(conn, bid, "google")
+
+
+def test_upsert_lens_sentiment_inserts_row(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "general", "neutral mention")
+    row = empty_conn.execute(
+        "SELECT lens, summary, computed_at FROM lens_sentiment WHERE run_id = ?",
+        (rid,),
+    ).fetchone()
+    assert row["lens"] == "general"
+    assert row["summary"] == "neutral mention"
+    assert row["computed_at"]
+    datetime.fromisoformat(row["computed_at"])
+
+
+def test_upsert_lens_sentiment_updates_in_place_no_duplicate(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "general", "first")
+    upsert_lens_sentiment(empty_conn, rid, "general", "second")
+    rows = empty_conn.execute(
+        "SELECT summary FROM lens_sentiment WHERE run_id = ? AND lens = 'general'",
+        (rid,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["summary"] == "second"
+
+
+def test_upsert_lens_sentiment_distinct_lenses_coexist(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "general", "g")
+    upsert_lens_sentiment(empty_conn, rid, "branded", "b")
+    upsert_lens_sentiment(empty_conn, rid, "all", "a")
+    got = get_lens_sentiments(empty_conn, rid)
+    assert got == {"general": "g", "branded": "b", "all": "a"}
+
+
+def test_upsert_lens_sentiment_none_summary_allowed(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "comparative", None)
+    row = empty_conn.execute(
+        "SELECT summary FROM lens_sentiment WHERE run_id = ? AND lens = 'comparative'",
+        (rid,),
+    ).fetchone()
+    assert row is not None
+    assert row["summary"] is None
+
+
+def test_get_lens_sentiments_returns_dict(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "general", "g")
+    upsert_lens_sentiment(empty_conn, rid, "branded", "b")
+    assert get_lens_sentiments(empty_conn, rid) == {"general": "g", "branded": "b"}
+
+
+def test_get_lens_sentiments_omits_null_summaries(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "general", "g")
+    upsert_lens_sentiment(empty_conn, rid, "comparative", None)
+    got = get_lens_sentiments(empty_conn, rid)
+    assert got == {"general": "g"}
+    assert "comparative" not in got
+
+
+def test_get_lens_sentiments_unknown_run_is_empty(empty_conn):
+    assert get_lens_sentiments(empty_conn, 9_999_999) == {}
+
+
+def test_get_lens_sentiments_returns_empty_when_table_absent(tmp_path):
+    conn = get_conn(str(tmp_path / "no_lens_table.db"))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE runs (id INTEGER PRIMARY KEY);
+            INSERT INTO runs (id) VALUES (1);
+            """
+        )
+        conn.commit()
+        names = {
+            r["name"]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        assert "lens_sentiment" not in names
+        assert get_lens_sentiments(conn, 1) == {}
+    finally:
+        conn.close()
+
+
+def test_upsert_lens_sentiment_clears_summary_to_none(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "general", "set")
+    assert get_lens_sentiments(empty_conn, rid) == {"general": "set"}
+    upsert_lens_sentiment(empty_conn, rid, "general", None)
+    assert get_lens_sentiments(empty_conn, rid) == {}
+    row = empty_conn.execute(
+        "SELECT summary FROM lens_sentiment WHERE run_id = ? AND lens = 'general'",
+        (rid,),
+    ).fetchone()
+    assert row is not None and row["summary"] is None
+
+
+def test_lens_sentiment_unique_constraint_enforced(empty_conn):
+    rid = _seeded_run(empty_conn)
+    upsert_lens_sentiment(empty_conn, rid, "general", "g")
+    with pytest.raises(sqlite3.IntegrityError):
+        empty_conn.execute(
+            "INSERT INTO lens_sentiment (run_id, lens, summary, computed_at) "
+            "VALUES (?, ?, ?, ?)",
+            (rid, "general", "dup", _utcnow_iso()),
+        )
+        empty_conn.commit()
+
+
+def test_init_db_creates_results_unique_index(empty_conn):
+    assert "idx_results_run_query_lens" in _index_names(empty_conn)
+
+
+def test_results_unique_index_blocks_duplicate_query_lens(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    rid = create_run(empty_conn, bid, "google")
+    empty_conn.execute(
+        "INSERT INTO results (run_id, query, lens, overview_present) VALUES (?, ?, ?, 1)",
+        (rid, "q", "general"),
+    )
+    empty_conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        empty_conn.execute(
+            "INSERT INTO results (run_id, query, lens, overview_present) VALUES (?, ?, ?, 1)",
+            (rid, "q", "general"),
+        )
+        empty_conn.commit()
+
+
+def test_results_unique_index_allows_same_query_across_runs(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    r1 = create_run(empty_conn, bid, "google")
+    r2 = create_run(empty_conn, bid, "google")
+    for rid in (r1, r2):
+        empty_conn.execute(
+            "INSERT INTO results (run_id, query, lens, overview_present) VALUES (?, ?, ?, 1)",
+            (rid, "q", "general"),
+        )
+    empty_conn.commit()
+    assert empty_conn.execute("SELECT COUNT(*) FROM results").fetchone()[0] == 2
+
+
+def test_get_captured_keys_returns_query_lens_pairs(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    rid = create_run(empty_conn, bid, "google")
+    for q, lens in [("q1", "general"), ("q2", "branded"), ("q3", "general")]:
+        empty_conn.execute(
+            "INSERT INTO results (run_id, query, lens, overview_present) VALUES (?, ?, ?, 1)",
+            (rid, q, lens),
+        )
+    empty_conn.commit()
+    assert get_captured_keys(empty_conn, rid) == {
+        ("q1", "general"),
+        ("q2", "branded"),
+        ("q3", "general"),
+    }
+
+
+def test_get_captured_keys_empty_for_unknown_run(empty_conn):
+    assert get_captured_keys(empty_conn, 999_999) == set()
+
+
+def test_get_captured_keys_scoped_to_run(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    r1 = create_run(empty_conn, bid, "google")
+    r2 = create_run(empty_conn, bid, "google")
+    empty_conn.execute(
+        "INSERT INTO results (run_id, query, lens, overview_present) VALUES (?, ?, ?, 1)",
+        (r1, "only-r1", "general"),
+    )
+    empty_conn.commit()
+    assert get_captured_keys(empty_conn, r1) == {("only-r1", "general")}
+    assert get_captured_keys(empty_conn, r2) == set()
+
+
+def test_find_unfinished_run_returns_running_run(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    rid = create_run(empty_conn, bid, "google")
+    assert find_unfinished_run(empty_conn, bid, "google") == rid
+
+
+def test_find_unfinished_run_none_when_done(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    rid = create_run(empty_conn, bid, "google")
+    update_run_counts(empty_conn, rid, status="done")
+    assert find_unfinished_run(empty_conn, bid, "google") is None
+
+
+def test_find_unfinished_run_picks_latest_running(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    create_run(empty_conn, bid, "google")
+    r2 = create_run(empty_conn, bid, "google")
+    assert find_unfinished_run(empty_conn, bid, "google") == r2
+
+
+def test_find_unfinished_run_scoped_by_brand_and_engine(empty_conn):
+    bid = get_or_create_brand(empty_conn, "Acme", "acme.com")
+    create_run(empty_conn, bid, "google")
+    assert find_unfinished_run(empty_conn, bid, "perplexity") is None
+    other = get_or_create_brand(empty_conn, "Other", "other.com")
+    assert find_unfinished_run(empty_conn, other, "google") is None
+
+
+def test_init_db_migrates_legacy_results_dedups_and_adds_unique_index(tmp_path):
+    conn = get_conn(str(tmp_path / "legacy_results.db"))
+    try:
+        init_db(conn)
+        conn.execute("DROP INDEX idx_results_run_query_lens")
+        bid = get_or_create_brand(conn, "Acme", "acme.com")
+        rid = create_run(conn, bid, "google")
+        for _ in range(2):
+            conn.execute(
+                "INSERT INTO results (run_id, query, lens, overview_present) "
+                "VALUES (?, ?, ?, 1)",
+                (rid, "dup-q", "general"),
+            )
+        conn.commit()
+        assert "idx_results_run_query_lens" not in _index_names(conn)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM results WHERE run_id = ?", (rid,)
+        ).fetchone()[0] == 2
+
+        init_db(conn)
+
+        assert "idx_results_run_query_lens" in _index_names(conn)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM results WHERE run_id = ?", (rid,)
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()

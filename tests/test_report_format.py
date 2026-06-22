@@ -36,7 +36,7 @@ from report.generate import (
 )
 from report.i18n import Translator
 
-ENGINE = "google_ai_overview"
+ENGINE = "google"
 
 
 @pytest.fixture
@@ -838,5 +838,69 @@ def test_load_report_data_run_with_no_metrics_treated_as_no_run(empty_db_path):
         conn.commit()
         with pytest.raises(ValueError, match="no completed runs with metrics"):
             load_report_data(conn, "Acme", "acme.com", ENGINE, "today")
+    finally:
+        conn.close()
+
+
+def test_reportdata_sentiment_summaries_defaults_to_empty_dict():
+    rd = ReportData(
+        brand_name="Acme",
+        brand_domain="acme.com",
+        engine=ENGINE,
+        period="today",
+        run_id=1,
+        run_at="2026-06-01T00:00:00Z",
+        prev_run_id=None,
+        prev_run_at=None,
+        metrics={},
+        prev_metrics={},
+        sentiments={},
+    )
+    assert rd.sentiment_summaries == {}
+    rd2 = ReportData(
+        brand_name="B", brand_domain="b.com", engine=ENGINE, period="all",
+        run_id=2, run_at="x", prev_run_id=None, prev_run_at=None,
+        metrics={}, prev_metrics={}, sentiments={},
+    )
+    rd.sentiment_summaries["all"] = "x"
+    assert rd2.sentiment_summaries == {}
+
+
+def test_load_report_data_populates_sentiment_summaries(seeded_db_path):
+    conn = get_conn(seeded_db_path)
+    try:
+        data = load_report_data(conn, "Acme", "acme.com", ENGINE, "today")
+        assert data.sentiment_summaries
+        assert set(data.sentiment_summaries).issubset(
+            {"general", "branded", "comparative", "all"}
+        )
+        assert "all" in data.sentiment_summaries
+        assert all(isinstance(v, str) and v for v in data.sentiment_summaries.values())
+    finally:
+        conn.close()
+
+
+def test_load_report_data_summaries_match_focus_run(seeded_db_path):
+    from pipeline.db import get_lens_sentiments
+
+    conn = get_conn(seeded_db_path)
+    try:
+        data = load_report_data(conn, "Acme", "acme.com", ENGINE, "today")
+        direct = get_lens_sentiments(conn, data.run_id)
+    finally:
+        conn.close()
+    assert data.sentiment_summaries == direct
+
+
+def test_load_report_data_summaries_empty_when_absent(empty_db_path):
+    conn = get_conn(empty_db_path)
+    try:
+        bid = get_or_create_brand(conn, "Solo", "solo.example")
+        rid = create_run(conn, bid, ENGINE)
+        update_run_counts(conn, rid, n_queries=1, n_ok=1, n_failed=0, status="done")
+        _insert_metric(conn, run_id=rid, brand_id=bid, lens="all")
+        conn.commit()
+        data = load_report_data(conn, "Solo", "solo.example", ENGINE, "today")
+        assert data.sentiment_summaries == {}
     finally:
         conn.close()

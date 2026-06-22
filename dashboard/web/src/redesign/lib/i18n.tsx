@@ -52,6 +52,10 @@ const I18nContext = createContext<I18nCtx | null>(null);
 function getInitialLang(): string {
   if (typeof window === "undefined") return DEFAULT_LANG;
   try {
+    const param = new URLSearchParams(window.location.search).get("lang");
+    if (param) return param;
+  } catch {}
+  try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored) return stored;
   } catch {}

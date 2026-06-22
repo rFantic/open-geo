@@ -2,12 +2,14 @@
 
 This directory holds **every user-facing UI string** for open-geo (dashboard +
 PDF report) in one place. English is the canonical, authoritative locale;
-Russian ships alongside it. Adding a language is dropping one JSON file.
+Russian, Chinese and Arabic ship alongside it. Adding a language is dropping one JSON file.
 
 ```
 i18n/
   en.json        # CANONICAL key set, English values — every key MUST exist here
   ru.json        # same keys, Russian values
+  zh.json        # same keys, Simplified Chinese values
+  ar.json        # same keys, Arabic values
   locales.json   # registry of available languages (drives the switcher)
   README.md      # this file
 ```
@@ -73,7 +75,7 @@ mirrors.
 
 - Load `i18n/<lang>.json`, **merged over `en.json`** so any missing key falls
   back to English.
-- Add a `--lang` flag: `--lang en|ru` (extensible to any registered code),
+- Add a `--lang` flag: `--lang en|ru|zh|ar` (extensible to any registered code),
   default `en`.
 - Resolve the `i18n/` path relative to the repo root, independent of CWD.
 
@@ -81,7 +83,7 @@ mirrors.
 
 1. **Only UI chrome is translated.** Captured **data** — query text, sentiment
    text, domains, brand names — is shown as-is and is **never** routed through
-   i18n. (Engine identifiers like `google_ai_overview` are also data; display
+   i18n. (Engine identifiers like `google` are also data; display
    them verbatim.)
 2. **UI language ≠ capture market.** The language of the interface is independent
    of the engine's locale/market the answers were captured in. Do not conflate

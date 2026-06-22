@@ -27,8 +27,7 @@ backlog spec is **ROADMAP Feature 3**.
 
 > The implemented id is **`google`** — canonical because it equals the playbook basename
 > `engines/google.md` (INTERFACES §1.1) and the value written to the live run/DB; that is what
-> `/open-geo` expects. (The synthetic seed/fixture/test layer still uses `google_ai_overview` —
-> an intentional, isolated exception, **not** the live id.) The **planned** engine ids above are
+> `/open-geo` expects. The seed/fixture/test layer uses the same `google` id. The **planned** engine ids above are
 > **proposals**; the final naming scheme (`<vendor>_<surface>`) is an open decision in ROADMAP
 > Feature 3. If `/open-geo` is invoked with an engine whose `engines/<engine>.md` is missing,
 > the skill **stops and asks for the playbook** — it never invents a capture procedure.

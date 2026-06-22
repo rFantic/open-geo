@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 import subprocess
 import sys
@@ -21,6 +22,8 @@ from pipeline.schema import QueryCapture
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+_CAP_SEQ = itertools.count()
+
 
 def _cap(
     *,
@@ -41,9 +44,9 @@ def _cap(
     ]
     return QueryCapture.model_validate(
         {
-            "query": f"{lens}-q",
+            "query": f"{lens}-q{next(_CAP_SEQ)}",
             "lens": lens,
-            "engine": "google_ai_overview",
+            "engine": "google",
             "captured_at": "2026-06-18T00:00:00Z",
             "overview_present": overview,
             "sources": sources,
@@ -61,7 +64,7 @@ def _fresh_run(db_path: str, caps: list[QueryCapture]) -> tuple[int, int]:
     try:
         init_db(conn)
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
         for c in caps:
             insert_capture(conn, run_id, c)
         conn.commit()
@@ -236,7 +239,7 @@ def test_compute_run_metrics_zero_results_only_all_row(empty_db_path):
     conn = get_conn(empty_db_path)
     try:
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
         rows = compute_run_metrics(conn, run_id)
     finally:
         conn.close()
@@ -285,7 +288,7 @@ def test_compute_run_metrics_unexpected_lens_sorted_after_known(empty_db_path):
     conn = get_conn(empty_db_path)
     try:
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
         insert_capture(conn, run_id, _cap(lens="general"))
         for odd in ("zzz", "aaa"):
             conn.execute(
@@ -360,7 +363,7 @@ def test_aggregate_run_persists_one_row_per_metric(empty_db_path):
 
     assert summary["run_id"] == run_id
     assert summary["brand_id"] == brand_id
-    assert summary["engine"] == "google_ai_overview"
+    assert summary["engine"] == "google"
     assert [m["lens"] for m in summary["metrics"]] == [
         "all", "general", "branded", "comparative"
     ]
@@ -436,7 +439,7 @@ def test_aggregate_run_persisted_columns_equal_computed(empty_db_path):
     for lens, prow in persisted_by_lens.items():
         comp = computed_by_lens[lens]
         assert prow["brand_id"] == brand_id
-        assert prow["engine"] == "google_ai_overview"
+        assert prow["engine"] == "google"
         for col in numeric_cols:
             pv, cv = prow[col], comp[col]
             if cv is None:
@@ -487,7 +490,7 @@ def test_main_valid_returns_zero_and_prints_json(empty_db_path, capsys):
     payload = json.loads(out)
     assert payload["run_id"] == run_id
     assert payload["brand_id"] == brand_id
-    assert payload["engine"] == "google_ai_overview"
+    assert payload["engine"] == "google"
     assert [m["lens"] for m in payload["metrics"]] == ["all", "general", "branded"]
 
     assert _metric_count(empty_db_path, run_id) == 3
@@ -623,7 +626,7 @@ def test_compute_run_metrics_only_unexpected_lenses_sorted(empty_db_path):
     conn = get_conn(empty_db_path)
     try:
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
         for odd in ("mmm", "aaa", "zzz"):
             conn.execute(
                 """
@@ -647,7 +650,7 @@ def test_compute_run_metrics_empty_string_lens_sorts_first_among_unexpected(empt
     conn = get_conn(empty_db_path)
     try:
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
         insert_capture(conn, run_id, _cap(lens="general"))
         for odd in ("bbb", ""):
             conn.execute(

@@ -5,12 +5,19 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 from pipeline.aggregate import aggregate_run
-from pipeline.db import create_run, get_conn, get_or_create_brand, init_db, update_run_counts
+from pipeline.db import (
+    create_run,
+    get_conn,
+    get_or_create_brand,
+    init_db,
+    update_run_counts,
+    upsert_lens_sentiment,
+)
 
 FIXTURE_DB = "data/_fixture_report.db"
 BRAND = "Acme"
 DOMAIN = "https://www.acme.com"
-ENGINE = "google_ai_overview"
+ENGINE = "google"
 TARGET = "acme.com"
 
 
@@ -140,6 +147,16 @@ def _seed_run(conn, brand_id: int, run_at: datetime, profile: str) -> int:
     n_total = len(general) + len(branded) + len(comparative)
     update_run_counts(conn, run_id, n_queries=n_total, n_ok=n_total, n_failed=0, status="done")
     aggregate_run(conn, run_id)
+
+    summaries = {
+        "general": "Surfaced among general options with mixed prominence.",
+        "branded": "Owns its branded queries, frequently with a direct link.",
+        "comparative": "Named alongside competitors without a decisive edge.",
+        "all": "Strong on branded queries, neutral to mixed elsewhere.",
+    }
+    for lens, summary in summaries.items():
+        upsert_lens_sentiment(conn, run_id, lens, summary)
+
     return run_id
 
 

@@ -30,7 +30,9 @@ def _links_to_jsonable(links: list[Any]) -> list[dict[str, Any]]:
     return [{"rank": ln.rank, "url": ln.url, "domain": ln.domain} for ln in links]
 
 
-def insert_capture(conn: sqlite3.Connection, run_id: int, cap: QueryCapture) -> int:
+def insert_capture(
+    conn: sqlite3.Connection, run_id: int, cap: QueryCapture
+) -> Optional[int]:
     cur = conn.execute(
         """
         INSERT INTO results (
@@ -40,6 +42,8 @@ def insert_capture(conn: sqlite3.Connection, run_id: int, cap: QueryCapture) -> 
             target_source_ranks_json, target_citation_ranks_json,
             brand_in_answer_text, sentiment
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, query, lens) DO NOTHING
+        RETURNING id
         """,
         (
             run_id,
@@ -57,13 +61,15 @@ def insert_capture(conn: sqlite3.Connection, run_id: int, cap: QueryCapture) -> 
             cap.sentiment,
         ),
     )
-    return int(cur.lastrowid)
+    row = cur.fetchone()
+    return int(row["id"]) if row is not None else None
 
 
 def ingest_batch(
     conn: sqlite3.Connection, run_id: int, objects: list[Any]
 ) -> dict[str, Any]:
     ok: list[int] = []
+    skipped: list[int] = []
     errors: list[dict[str, Any]] = []
 
     for index, raw in enumerate(objects):
@@ -81,21 +87,19 @@ def ingest_batch(
                 }
             )
             continue
-        insert_capture(conn, run_id, cap)
-        ok.append(index)
+        if insert_capture(conn, run_id, cap) is None:
+            skipped.append(index)
+        else:
+            ok.append(index)
 
     conn.commit()
 
-    update_run_counts(
-        conn,
-        run_id,
-        n_queries=len(objects),
-        n_ok=len(ok),
-        n_failed=len(errors),
-        status="done",
-    )
+    n_ok = conn.execute(
+        "SELECT COUNT(*) FROM results WHERE run_id = ?", (run_id,)
+    ).fetchone()[0]
+    update_run_counts(conn, run_id, n_ok=n_ok)
 
-    return {"run_id": run_id, "ok": ok, "errors": errors}
+    return {"run_id": run_id, "ok": ok, "skipped": skipped, "errors": errors}
 
 
 def _read_stdin_array() -> list[Any]:
@@ -120,7 +124,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("--brand", help="Brand name (with --new-run).")
     parser.add_argument("--domain", help="Brand domain/URL (with --new-run).")
-    parser.add_argument("--engine", help="Engine id, e.g. google_ai_overview (with --new-run).")
+    parser.add_argument("--engine", help="Engine id, e.g. google (with --new-run).")
     parser.add_argument(
         "--new-run",
         action="store_true",
@@ -172,6 +176,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         result = ingest_batch(conn, args.run_id, objects)
         _err(
             f"ingest: run {args.run_id} — {len(result['ok'])} ok, "
+            f"{len(result['skipped'])} skipped, "
             f"{len(result['errors'])} errors of {len(objects)}"
         )
         print(json.dumps(result, ensure_ascii=False))

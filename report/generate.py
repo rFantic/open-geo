@@ -21,9 +21,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-from pipeline.db import get_conn, init_db
+from pipeline.db import get_conn, get_lens_sentiments, init_db
 from pipeline.schema import normalize_domain
 from report.i18n import DEFAULT_LANG, Translator, available_codes
+from report.textshape import is_rtl, shape
 
 
 BG = "#0e1117"
@@ -64,26 +65,66 @@ MARGIN = 18 * mm
 
 _LENS_ORDER = ["general", "branded", "comparative"]
 
+_FONTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts"
+)
+
+_DEJAVU_FACES = {
+    "DejaVuSans": "DejaVuSans.ttf",
+    "DejaVuSans-Bold": "DejaVuSans-Bold.ttf",
+    "DejaVuSans-Oblique": "DejaVuSans-Oblique.ttf",
+}
+
+_NOTO_FACES = {
+    "NotoSansSC": "NotoSansSC-Regular.ttf",
+    "NotoSansSC-Bold": "NotoSansSC-Bold.ttf",
+    "NotoNaskhArabic": "NotoNaskhArabic-Regular.ttf",
+    "NotoNaskhArabic-Bold": "NotoNaskhArabic-Bold.ttf",
+}
+
+_DEJAVU_STACK = ("DejaVuSans", "DejaVuSans-Bold", "DejaVuSans-Oblique", "DejaVu Sans")
+
+_LANG_FONTS = {
+    "zh": ("NotoSansSC", "NotoSansSC-Bold", "NotoSansSC", "Noto Sans SC"),
+    "ar": ("NotoNaskhArabic", "NotoNaskhArabic-Bold", "NotoNaskhArabic", "Noto Naskh Arabic"),
+}
+
 
 def _dejavu_dir() -> str:
     return os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
 
 
-def register_fonts() -> None:
-    ttf_dir = _dejavu_dir()
-    faces = {
-        FONT: "DejaVuSans.ttf",
-        FONT_BOLD: "DejaVuSans-Bold.ttf",
-        FONT_OBLIQUE: "DejaVuSans-Oblique.ttf",
-    }
-    registered = pdfmetrics.getRegisteredFontNames()
-    for name, fname in faces.items():
-        if name in registered:
-            continue
-        pdfmetrics.registerFont(TTFont(name, os.path.join(ttf_dir, fname)))
+def _register_face(name: str, path: str) -> bool:
+    if not os.path.isfile(path):
+        return False
+    if name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(name, path))
+    fm.fontManager.addfont(path)
+    return True
 
-    fm.fontManager.addfont(os.path.join(ttf_dir, "DejaVuSans.ttf"))
-    plt.rcParams["font.family"] = "DejaVu Sans"
+
+def register_fonts(lang: str = DEFAULT_LANG) -> None:
+    global FONT, FONT_BOLD, FONT_OBLIQUE
+    ttf_dir = _dejavu_dir()
+    for name, fname in _DEJAVU_FACES.items():
+        _register_face(name, os.path.join(ttf_dir, fname))
+
+    available = {
+        name
+        for name, fname in _NOTO_FACES.items()
+        if _register_face(name, os.path.join(_FONTS_DIR, fname))
+    }
+
+    regular, bold, oblique, family = _DEJAVU_STACK
+    spec = _LANG_FONTS.get(lang)
+    if spec and spec[0] in available and spec[1] in available:
+        regular, bold, oblique, family = spec
+        families = [family, "DejaVu Sans"]
+    else:
+        families = ["DejaVu Sans"]
+
+    FONT, FONT_BOLD, FONT_OBLIQUE = regular, bold, oblique
+    plt.rcParams["font.family"] = families
     plt.rcParams["axes.unicode_minus"] = False
 
 
@@ -118,6 +159,7 @@ class ReportData:
     prev_metrics: dict[str, LensMetrics]
     sentiments: dict[str, list[tuple[str, str]]]
     history: list[tuple[str, dict[str, LensMetrics]]] = field(default_factory=list)
+    sentiment_summaries: dict[str, str] = field(default_factory=dict)
 
 
 def _row_get(row: sqlite3.Row, key: str) -> Any:
@@ -244,6 +286,7 @@ def load_report_data(
     metrics = _load_metrics_for_run(conn, focus_id)
     prev_metrics = _load_metrics_for_run(conn, prev_id) if prev_id is not None else {}
     sentiments = _load_sentiments(conn, focus_id)
+    sentiment_summaries = get_lens_sentiments(conn, focus_id)
 
     brow = conn.execute(
         "SELECT name, domain FROM brands WHERE id = ?", (brand_id,)
@@ -268,6 +311,7 @@ def load_report_data(
         prev_metrics=prev_metrics,
         sentiments=sentiments,
         history=history,
+        sentiment_summaries=sentiment_summaries,
     )
 
 
@@ -413,7 +457,7 @@ def chart_lenses_grouped_bar(t: Translator, metrics: dict[str, LensMetrics]) -> 
             vals,
             width=bar_w * 0.92,
             color=LENS_COLORS.get(lens, ACCENT),
-            label=lens_label(t, lens),
+            label=shape(lens_label(t, lens), t.lang),
             edgecolor="none",
         )
         for rect, v, attr in zip(bars, vals, [g[1] for g in groups]):
@@ -430,7 +474,7 @@ def chart_lenses_grouped_bar(t: Translator, metrics: dict[str, LensMetrics]) -> 
             )
 
     ax.set_xticks(x)
-    ax.set_xticklabels([g[0] for g in groups], fontsize=9, color=INK)
+    ax.set_xticklabels([shape(g[0], t.lang) for g in groups], fontsize=9, color=INK)
     ax.set_ylim(0, 109)
     ax.set_ylabel("%", color=INK_DIM)
     _style_axes(ax)
@@ -472,7 +516,7 @@ def chart_funnel(t: Translator, m: LensMetrics) -> bytes:
         ax.barh(y, 1.0, height=0.62, color=PANEL_ALT, edgecolor="none", zorder=0)
         ax.barh(y, width, height=0.62, color=color, edgecolor="none", zorder=1)
         ax.text(
-            -0.02, y, label, ha="right", va="center", fontsize=9.5, color=INK
+            -0.02, y, shape(label, t.lang), ha="right", va="center", fontsize=9.5, color=INK
         )
         ax.text(
             width + 0.015,
@@ -500,7 +544,7 @@ def chart_funnel(t: Translator, m: LensMetrics) -> bytes:
     ax.text(
         0.5,
         -0.55,
-        t.t("report.funnel_rates", sources=src_text, citations=cite_text),
+        shape(t.t("report.funnel_rates", sources=src_text, citations=cite_text), t.lang),
         ha="center",
         va="center",
         fontsize=9,
@@ -510,7 +554,7 @@ def chart_funnel(t: Translator, m: LensMetrics) -> bytes:
     ax.text(
         0.5,
         -0.92,
-        f"{conv_label}: {conv_text}",
+        shape(f"{conv_label}: {conv_text}", t.lang),
         ha="center",
         va="center",
         fontsize=9,
@@ -550,7 +594,7 @@ def chart_history(
             markersize=5,
             linewidth=2.0,
             color=color,
-            label=name,
+            label=shape(name, t.lang),
         )
 
     ax.set_xticks(xs)
@@ -566,9 +610,10 @@ def chart_history(
 
 class Doc:
 
-    def __init__(self, c: canvas.Canvas):
+    def __init__(self, c: canvas.Canvas, rtl: bool = False):
         self.c = c
         self.y = PAGE_H - MARGIN
+        self.rtl = rtl
 
     def fill_background(self) -> None:
         self.c.setFillColor(BG)
@@ -588,14 +633,17 @@ class Doc:
         s: str,
         size: float,
         color: str = INK,
-        font: str = FONT,
+        font: Optional[str] = None,
         x: Optional[float] = None,
         dy: float = 0.0,
     ) -> None:
         self.c.setFillColor(color)
-        self.c.setFont(font, size)
-        xx = MARGIN if x is None else x
-        self.c.drawString(xx, self.y + dy, s)
+        self.c.setFont(font or FONT, size)
+        if self.rtl and x is None:
+            self.c.drawRightString(PAGE_W - MARGIN, self.y + dy, s)
+        else:
+            xx = MARGIN if x is None else x
+            self.c.drawString(xx, self.y + dy, s)
 
     def text_right(self, s: str, size: float, color: str, font: str, x_right: float, dy: float = 0.0) -> None:
         self.c.setFillColor(color)
@@ -1031,6 +1079,15 @@ def render_sentiment(doc: Doc, t: Translator, data: ReportData) -> None:
     )
     doc.move(14)
 
+    avail = PAGE_W - 2 * MARGIN
+    all_summary = data.sentiment_summaries.get("all")
+    if all_summary:
+        for ln_txt in _wrap_text(doc.c, all_summary, FONT_OBLIQUE, 9.5, avail):
+            doc.ensure(13)
+            doc.text(ln_txt, 9.5, INK_DIM, FONT_OBLIQUE)
+            doc.move(12)
+        doc.move(4)
+
     lenses_with_data = [ln for ln in _LENS_ORDER if data.sentiments.get(ln)]
     for ln in data.sentiments:
         if ln not in lenses_with_data:
@@ -1042,7 +1099,6 @@ def render_sentiment(doc: Doc, t: Translator, data: ReportData) -> None:
         return
 
     by_query = t.t("report.sentiment_by_query")
-    avail = PAGE_W - 2 * MARGIN
     text_x = MARGIN + 10 * mm
     text_max_w = avail - 12 * mm
 
@@ -1057,6 +1113,16 @@ def render_sentiment(doc: Doc, t: Translator, data: ReportData) -> None:
         doc.c.circle(MARGIN + 3, doc.y + 3, 2.4, stroke=0, fill=1)
         doc.text(lens_label(t, lens), 11, INK, FONT_BOLD, x=MARGIN + 9)
         doc.move(13)
+
+        lens_summary = data.sentiment_summaries.get(lens)
+        if lens_summary:
+            for ln_txt in _wrap_text(doc.c, lens_summary, FONT_OBLIQUE, 9.5, text_max_w):
+                doc.ensure(13)
+                doc.c.setFillColor(INK_DIM)
+                doc.c.setFont(FONT_OBLIQUE, 9.5)
+                doc.c.drawString(MARGIN + 9, doc.y, ln_txt)
+                doc.move(12)
+            doc.move(3)
 
         for query, phrase in snippets:
             phrase_lines = _wrap_text(doc.c, phrase, FONT, 10, text_max_w)
@@ -1111,13 +1177,33 @@ def _install_footer_hook(doc: Doc, t: Translator, data: ReportData) -> None:
     doc.new_page = new_page_with_footer  # type: ignore[assignment]
 
 
+def _install_rtl_shaping(c: canvas.Canvas, lang: str) -> None:
+    base_draw = c.drawString
+
+    def draw(x: float, y: float, text: str, *a: Any, **k: Any) -> Any:
+        return base_draw(x, y, shape(text, lang), *a, **k)
+
+    def draw_right(x: float, y: float, text: str, *a: Any, **k: Any) -> Any:
+        s = shape(text, lang)
+        return base_draw(x - c.stringWidth(s, c._fontname, c._fontsize), y, s, *a, **k)
+
+    def draw_centred(x: float, y: float, text: str, *a: Any, **k: Any) -> Any:
+        s = shape(text, lang)
+        return base_draw(x - c.stringWidth(s, c._fontname, c._fontsize) / 2.0, y, s, *a, **k)
+
+    c.drawString = draw  # type: ignore[method-assign]
+    c.drawRightString = draw_right  # type: ignore[method-assign]
+    c.drawCentredString = draw_centred  # type: ignore[method-assign]
+
+
 def build_pdf(
     data: ReportData,
     out_path: str,
     generated_at: Optional[datetime] = None,
     lang: str = DEFAULT_LANG,
 ) -> None:
-    register_fonts()
+    register_fonts(lang)
+    rtl = is_rtl(lang)
     generated_at = generated_at or datetime.now()
     t = Translator(lang)
 
@@ -1126,11 +1212,13 @@ def build_pdf(
         os.makedirs(parent, exist_ok=True)
 
     c = canvas.Canvas(out_path, pagesize=A4)
+    if rtl:
+        _install_rtl_shaping(c, lang)
     c.setTitle(f"{t.t('report.cover_subtitle')} — {data.brand_name}")
     c.setAuthor(t.t("common.app_title"))
     c.setSubject(t.t("report.cover_subtitle"))
 
-    doc = Doc(c)
+    doc = Doc(c, rtl=rtl)
 
     render_cover(doc, t, data, generated_at)
     doc.new_page()
@@ -1175,7 +1263,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("--brand", required=True, help="Brand name (as stored in the DB).")
     parser.add_argument("--domain", required=True, help="Target domain of the brand.")
-    parser.add_argument("--engine", required=True, help="Engine identifier, e.g. google_ai_overview.")
+    parser.add_argument("--engine", required=True, help="Engine identifier, e.g. google.")
     parser.add_argument(
         "--period",
         required=True,

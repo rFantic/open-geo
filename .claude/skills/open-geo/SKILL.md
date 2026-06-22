@@ -1,7 +1,7 @@
 ---
 name: open-geo
 description: Run a list of queries through a chosen AI engine, measure the target domain's visibility/citation in the AI answers, and produce a dashboard or PDF report. Use when the user runs /open-geo or asks to measure a brand's GEO / AI-search visibility (citations in Google AI Overview, etc.).
-argument-hint: "<questions.csv> <engine> <domain> --brand <name> --n-worker <N> [--output dashboard|pdf|both] [--period today|all] [--lang en|ru]"
+argument-hint: "<questions.csv> <engine> <domain> --brand <name> --n-worker <N> [--output dashboard|pdf|both] [--period today|all] [--lang en|ru|zh|ar]"
 disable-model-invocation: true
 allowed-tools: Read, Write, Bash(.venv/bin/python:*), Bash(npm:*), Bash(uvicorn:*), Bash(mktemp:*), Task, AskUserQuestion
 # Orchestrator-only tools. STEP A uses AskUserQuestion for the parameter wizard; Task spawns the
@@ -36,7 +36,7 @@ ambiguous — the shapes there win over this prose.
 
 ```
 /open-geo <questions.csv> <engine> <domain> --brand "<name>" --n-worker <N> \
-          [--output dashboard|pdf|both] [--period today|all] [--lang en|ru]
+          [--output dashboard|pdf|both] [--period today|all] [--lang en|ru|zh|ar]
 ```
 
 ### Positional arguments
@@ -55,7 +55,7 @@ ambiguous — the shapes there win over this prose.
 | `--n-worker <N>` | yes | — | Number of capture sub-agents to run **in parallel** — the run's concurrency. Step 2 splits the queries into N chunks, one per worker. |
 | `--output dashboard\|pdf\|both` | no | `dashboard` | Which deliverable(s) to produce in step 6. |
 | `--period today\|all` | no | `all` | Reporting window passed to the dashboard/report: `today` = just this run's date, `all` = full history for this brand+engine (enables the previous-run deltas described in INTERFACES §4.1). |
-| `--lang en\|ru` | no | `en` | UI language for the deliverables: it is passed to the report (`report.generate --lang`) and is the dashboard's **default** language (the switcher can still change it in the browser). Extensible to any code registered in `i18n/locales.json`. It also sets the language of the **final summary** you print in step 7. |
+| `--lang en\|ru\|zh\|ar` | no | `en` | UI language for the deliverables: it is passed to the report (`report.generate --lang`) and is the dashboard's **default** language (the switcher can still change it in the browser). Extensible to any code registered in `i18n/locales.json`. It also sets the language of the **final summary** you print in step 7. |
 
 If a required argument is missing, go to **STEP A** (the parameter wizard) to collect it
 interactively. Only hard-stop — a short error (in `--lang`), no empty run — if a required value
@@ -86,7 +86,7 @@ Run this **first**, before STEP 0. Goal: end up with every required parameter re
         (today: `google`). If the user names an engine without a playbook, say it is not available
         yet (ROADMAP Feature 3) and stop.
       - `--n-worker` — presets `1 / 3 / 5 / 10` (+ custom).
-      - `--output` — `dashboard / pdf / both`. `--period` — `today / all`. `--lang` — `en / ru`.
+      - `--output` — `dashboard / pdf / both`. `--period` — `today / all`. `--lang` — `en / ru / zh / ar`.
       - `questions.csv` — offer found CSVs (+ "other path"):
         `.venv/bin/python -c "import glob; print('\n'.join(glob.glob('*.csv')+glob.glob('examples/*.csv')))"`
       - `domain` and `--brand` — free text.
@@ -116,19 +116,37 @@ Run this **first**, before STEP 0. Goal: end up with every required parameter re
 
 ---
 
-## STEP 1 — CREATE THE RUN
+## STEP 1 — CREATE OR RESUME THE RUN
 
-Create the brand (if new) and a fresh run, and capture the `run_id` from JSON stdout:
+First check for an **unfinished run to resume** — a previous run of this brand+engine
+left `status='running'` by a crash (INTERFACES §2.1). Look before creating anything:
 
 ```bash
-.venv/bin/python -m pipeline.ingest \
-  --brand "<name>" --domain <domain> --engine <engine> --new-run
+.venv/bin/python -c "
+import json
+from pipeline.db import get_conn, init_db, get_or_create_brand, find_unfinished_run
+conn = get_conn('data/aeo.db'); init_db(conn)
+bid = get_or_create_brand(conn, '<name>', '<domain>')
+print(json.dumps({'run_id': find_unfinished_run(conn, bid, '<engine>')}))
+"
 ```
 
-- **stdout:** `{"run_id": <int>}` (per INTERFACES §3.1). Parse it and keep `<run_id>`
-  for every later step. Human/log noise goes to STDERR — only the JSON object is on STDOUT.
-- If this command errors or stdout is not parseable JSON with a `run_id`, stop and report
-  it (in `--lang`). Nothing downstream can proceed without `run_id`.
+- **`run_id` non-null → an unfinished run exists.** Offer to **resume** it (reuse that
+  `run_id`; STEP 2 captures only the rows it is still missing) vs. start fresh. On the
+  **fast path** (loops/headless, all args supplied) **resume automatically** — unattended
+  recovery is the whole point. Keep the chosen `<run_id>` and skip the `--new-run` call.
+- **`run_id` null (or the user chose fresh) → create a fresh run** and capture its
+  `run_id` from JSON stdout:
+
+  ```bash
+  .venv/bin/python -m pipeline.ingest \
+    --brand "<name>" --domain <domain> --engine <engine> --new-run
+  ```
+
+  **stdout:** `{"run_id": <int>}` (per INTERFACES §3.1). Parse it and keep `<run_id>` for
+  every later step. Human/log noise goes to STDERR — only the JSON object is on STDOUT.
+- If creation errors or stdout is not parseable JSON with a `run_id`, stop and report it
+  (in `--lang`). Nothing downstream can proceed without `run_id`.
 
 ---
 
@@ -146,8 +164,21 @@ Create the brand (if new) and a fresh run, and capture the `run_id` from JSON st
      to drive it" lives in that file. The pattern for authoring a new engine playbook is in
      `engines/README.md` (multi-engine is ROADMAP Feature 3). *(Only `engines/google.md`
      ships today; passing any other engine id needs its playbook written first.)*
-3. Split `rows` into `min(N, len(rows))` contiguous chunks of roughly equal size, where
-   `N = --n-worker`. Each chunk keeps its rows' original `(query, lens)` pairs.
+3. **If resuming an existing run** (STEP 1 returned one), drop rows already captured —
+   read the captured keys and keep only the missing `(query, lens)`:
+   ```bash
+   .venv/bin/python -c "
+   import json
+   from pipeline.db import get_conn, get_captured_keys
+   conn = get_conn('data/aeo.db')
+   print(json.dumps(sorted(list(t) for t in get_captured_keys(conn, <run_id>))))
+   "
+   ```
+   Subtract those from `rows`. If **nothing** remains, skip capture entirely and jump to
+   STEP 4.2 (finalize) → STEP 5. (Ingest is idempotent, so re-capturing a stored row is
+   harmless — skipping just saves a browser hit.)
+4. Split the rows to capture into `min(N, len(rows))` contiguous chunks of roughly equal
+   size, where `N = --n-worker`. Each chunk keeps its rows' original `(query, lens)` pairs.
 
 ---
 
@@ -192,18 +223,23 @@ concurrency — raise it to go wider.
 
 ## STEP 4 — INGEST & FINALIZE (orchestrator owns all DB writes)
 
-Now — and only now — does the database get written. **You** (the orchestrator) ingest the
-objects the workers returned; the workers never touched the DB.
+The database is written **only by you** (the orchestrator), **as each worker returns its
+chunk** — incrementally, so a crash mid-run never loses already-captured work (INTERFACES
+§2.1). The workers never touched the DB.
 
-1. **Collect** every `QueryCapture` object the workers returned into one **JSON array**,
-   write it to a temp file (to stay UTF-8/Cyrillic-safe), and ingest it into the run:
+1. **Ingest each worker's chunk as it returns — incrementally, not one batch at the end**
+   (durability: a crash can't lose chunks already returned). For each returned
+   `QueryCapture` array, write it to a temp file (UTF-8/Cyrillic-safe) and ingest into the
+   run:
    ```bash
-   .venv/bin/python -m pipeline.ingest --run-id <run_id> < /tmp/open_geo_batch.json
+   .venv/bin/python -m pipeline.ingest --run-id <run_id> < /tmp/open_geo_chunk_<idx>.json
    ```
-   Read stdout `{"run_id", "ok": [...], "errors": [...]}` (INTERFACES §3.2). Fix any row in
-   `errors` — correct the field from the returned data, or re-dispatch that one `(query,
-   lens)` to a worker — and re-send **only** the fixed objects to the same `--run-id`.
-   Repeat until `errors` is empty (bounded retries; then report residual failures).
+   Read stdout `{"run_id", "ok": [...], "skipped": [...], "errors": [...]}` (INTERFACES
+   §3.2). Ingest is **idempotent** on `(run_id, query, lens)`, so `skipped` (already-stored
+   rows — normal on a resume/retry) is safe, never a duplicate. Fix any row in `errors` —
+   correct the field from the returned data, or re-dispatch that one `(query, lens)` to a
+   worker — and re-send **only** the fixed objects to the same `--run-id`. Repeat until
+   `errors` is empty (bounded retries; then report residual failures).
 
 2. **Finalize** counts + status. There is no "finalize" CLI; use the documented helper
    `pipeline.db.update_run_counts` (INTERFACES §2) inline:
@@ -218,10 +254,12 @@ objects the workers returned; the workers never touched the DB.
                      status='done')
    "
    ```
-   `n_queries` = total `(query, lens)` rows attempted (from the CSV); `n_ok` = rows ingest
-   accepted; `n_failed` = rows that never made it in. Set `status='done'` on success, or
-   `'failed'` if the run collapsed (playbook missing, engine unreachable for everything). A
-   completed run with `status='done'` is what unlocks previous-run **deltas** for
+   `n_queries` = total `(query, lens)` rows attempted (from the **full CSV**, including a
+   resume's already-done rows); `n_ok` = rows captured (ingest keeps this live, =
+   `COUNT(results)`); `n_failed` = `n_queries − n_ok`. Set `status='done'` on success, or
+   `'failed'` if the run collapsed (playbook missing, engine unreachable for everything).
+   **Finalizing `status` is the orchestrator's job — `ingest` never sets it** (INTERFACES
+   §2.1/§3.2); a completed run with `status='done'` unlocks previous-run **deltas** for
    `--period all` (INTERFACES §4.1). **Never leave a run stuck in `status='running'`.**
 
 ---
@@ -235,6 +273,53 @@ objects the workers returned; the workers never touched the DB.
 - Computes metrics **per lens** plus one `lens="all"` aggregate row, writes them to the
   `metrics` table, and prints a JSON summary on stdout (INTERFACES §3.3). **Capture this
   stdout** — step 7's summary reads its `metrics` (`lens="all"` row) directly.
+
+---
+
+## STEP 5b — SYNTHESIZE PER-LENS SENTIMENT (orchestrator writes the qualitative roll-up)
+
+`pipeline.aggregate` (STEP 5) stays **deterministic math** — it does **not** touch sentiment.
+**You** (the orchestrator, already an LLM) write the qualitative per-lens roll-up here, then
+persist it via `pipeline.lens_sentiment` (INTERFACES **§3.4**) into the `lens_sentiment` table
+(INTERFACES **§2**). This is separate from `metrics` on purpose, so a re-aggregate never
+clobbers the synthesized prose.
+
+1. **Gather the per-query `sentiment`s grouped by lens** for this run. You already have them
+   from the STEP 4 captures; if not handy, read them back from `results` inline:
+   ```bash
+   .venv/bin/python -c "
+   import json
+   from pipeline.db import get_conn
+   conn = get_conn('data/aeo.db')
+   rows = conn.execute(
+       'SELECT lens, sentiment FROM results WHERE run_id=? ORDER BY lens',
+       (<run_id>,)).fetchall()
+   print(json.dumps([dict(r) for r in rows], ensure_ascii=False))
+   "
+   ```
+2. **Write ONE short, neutral sentence per lens** that appears in the run (`general`,
+   `branded`, `comparative`), plus an `all` synthesis across them. **Summarize ONLY what the
+   per-query `sentiment` strings of that lens actually say** — never invent ranks, competitors,
+   numbers, or praise the captures don't contain; keep it ~1 sentence.
+   - **Language: follow the DATA, not `--lang`.** The summary is a roll-up of captured sentiment
+     text, so write it in the language those `sentiment` strings are in (e.g. Russian captures →
+     Russian summary), regardless of the deliverable `--lang`.
+   - If a lens had the brand in **no query** (every `sentiment` `null`), set that lens's summary
+     to **`null`** (the UI then shows a "not mentioned" fallback). Likewise `all` is `null` only
+     if the brand appeared in no query at all.
+3. **Persist** by piping a JSON **object** `{lens: summary}` to `pipeline.lens_sentiment`.
+   Write the JSON to a temp file first for UTF-8/Cyrillic safety, exactly like the STEP 4 batch
+   ingest does:
+   ```bash
+   # /tmp/open_geo_sentiment.json holds e.g.
+   # {"all": "...", "general": "...", "branded": "...", "comparative": null}
+   .venv/bin/python -m pipeline.lens_sentiment --run-id <run_id> < /tmp/open_geo_sentiment.json
+   ```
+   Read stdout `{"run_id": <run_id>, "written": [...]}` (INTERFACES §3.4) to confirm which
+   lenses were upserted. Only the lenses you include are written; an unknown `run_id` exits 1.
+
+The dashboard then renders these as a **"Sentiment by lens"** card strip above the results
+table, and the PDF report shows them as the lead line of its sentiment section.
 
 ---
 
@@ -254,30 +339,45 @@ objects the workers returned; the workers never touched the DB.
 
 Start the dashboard (FastAPI backend + Vite/React frontend) and print the **local URL**.
 The frontend selects brand/engine/period through its own UI controls (read from the API),
-so you start the services and hand the operator the dev URL — you do **not** craft a
-query-string-scoped link. The dashboard defaults its UI language to `--lang` (the in-browser
-switcher can change it).
+so you do **not** scope brand/engine/period via the query string — **only the UI language**:
+hand the operator `http://localhost:5173/?lang=<lang>`, which seeds the dashboard's initial
+language from the run's `--lang` (the in-browser switcher still overrides it, and the choice
+persists in `localStorage`).
 
 ```bash
 # Run BOTH in the background (they are long-running dev servers).
+# Background shells do NOT inherit the repo-root CWD, so use ABSOLUTE paths anchored at
+# <REPO> = the repository root (your working directory). Do NOT use a relative
+# `.venv/bin/python` or `cd dashboard/web` here — backgrounded, they fail (exit 127 /
+# wrong CWD). `--app-dir <REPO>` lets uvicorn import `dashboard.api` regardless of CWD.
+#
 # 1) API (read-only over data/aeo.db). PICK A FREE PORT — 8000 is often taken:
-OPEN_GEO_DB=data/aeo.db .venv/bin/python -m uvicorn dashboard.api:app \
-    --host 127.0.0.1 --port <PORT>
+OPEN_GEO_DB=<REPO>/data/aeo.db <REPO>/.venv/bin/python -m uvicorn dashboard.api:app \
+    --host 127.0.0.1 --port <PORT> --app-dir <REPO>
 
-# 2) Web (Vite dev server), pointed at the API's port:
-cd dashboard/web && npm install && VITE_API_BASE=http://127.0.0.1:<PORT> npm run dev
+# 2) Web (Vite dev server), pointed at the API's port. Use `npm --prefix` instead of `cd`
+#    (run `npm --prefix <REPO>/dashboard/web install` once if node_modules is missing):
+VITE_API_BASE=http://127.0.0.1:<PORT> npm --prefix <REPO>/dashboard/web run dev
 ```
 
 - **Port caveat:** local port **8000 is often already occupied** by another service on
   this machine. Pick a free port for the API (e.g. `8077`) and point the frontend at it via
   `VITE_API_BASE` (CORS is open, so a cross-origin base works without the dev proxy):
   ```bash
-  VITE_API_BASE=http://127.0.0.1:<PORT> npm run dev
+  VITE_API_BASE=http://127.0.0.1:<PORT> npm --prefix <REPO>/dashboard/web run dev
   ```
+- **Verify before handing off** (a backgrounded server can exit non-zero or the port can
+  clash): probe both before printing the URL —
+  ```bash
+  curl -s http://127.0.0.1:<PORT>/api/health
+  curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5173/
+  ```
+  so you surface a *working* URL, not a hopeful one.
 - After both are up, print the **Vite dev URL** the operator should open —
-  `http://localhost:5173` (the frontend's own controls drive brand/engine/period, and the
-  language switcher defaults to `--lang`). If `dashboard/` cannot be started, say so (in
-  `--lang`) and skip gracefully (still finish steps 5 and 7).
+  `http://localhost:5173/?lang=<lang>` (the frontend's own controls drive brand/engine/period;
+  `?lang=<lang>` seeds the UI language from the run's `--lang`, and the switcher still
+  overrides). If `dashboard/` cannot be started, say so (in `--lang`) and skip gracefully
+  (still finish steps 5 and 7).
 
 ### `--output pdf` — or as part of `both`
 
@@ -338,7 +438,7 @@ Run for brand "Acme" (engine google), queries: 30.
 • Average source position: 2.4 (lower is better).
 • Average citation position: 1.7 (lower is better).
 • Source→citation conversion (relative citation): 78% (higher is better).
-Report: reports/acme_2026-06-19.pdf · Dashboard: http://localhost:5173
+Report: reports/acme_2026-06-19.pdf · Dashboard: http://localhost:5173/?lang=en
 ```
 
 ---
@@ -350,8 +450,9 @@ Report: reports/acme_2026-06-19.pdf · Dashboard: http://localhost:5173
 | 0 | `audit.gate` (name TBD) | **Not built** — ROADMAP Feature 2; no-op placeholder for now |
 | 1 | `python -m pipeline.ingest --new-run` | Contract in INTERFACES §3.1 |
 | 3 | `capture-worker` subagent (`.claude/agents/capture-worker.md`) driving `engines/<engine>.md` (workers **capture & return JSON** — no DB writes) | Capture contract §1; playbook file may be absent early |
-| 4 | `python -m pipeline.ingest --run-id` (orchestrator) + `pipeline.db.update_run_counts` | Central ingest §3.2 + finalize helper §2 (call inline) |
+| 4 | `python -m pipeline.ingest --run-id` (orchestrator) + `pipeline.db.update_run_counts` | Incremental per-chunk ingest §3.2 (idempotent) + finalize helper §2 (call inline) |
 | 5 | `python -m pipeline.aggregate --run-id` | Contract in INTERFACES §3.3 |
+| 5b | `python -m pipeline.lens_sentiment --run-id` (orchestrator-written qualitative per-lens roll-up) | Contract in INTERFACES §3.4 |
 | 6 | `python -m report.generate … --lang <lang>`; dashboard API (`uvicorn dashboard.api:app`) + web (`npm run dev`) | **Built** — entry points confirmed/working; contracts live in `report/` & `dashboard/` (intentionally not in INTERFACES) |
 
 Keep the run operator-friendly: parse JSON from stdout (never scrape logs), fail loudly (in

@@ -42,6 +42,11 @@ data/responses/
 reports/*.pdf
 reports/*.png
 
+# --- Font build cache (upstream variable fonts pulled by fonts/build.py) ---
+# The subsetted .ttf faces + OFL licenses under fonts/ stay committed; only the
+# large upstream downloads used to regenerate them are ignored.
+fonts/.cache/
+
 # --- Dashboard frontend (Node) ---
 dashboard/web/node_modules/
 dashboard/web/dist/

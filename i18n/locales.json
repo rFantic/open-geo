@@ -1,4 +1,6 @@
 [
   { "code": "en", "name": "English" },
-  { "code": "ru", "name": "Русский" }
+  { "code": "ru", "name": "Русский" },
+  { "code": "zh", "name": "中文" },
+  { "code": "ar", "name": "العربية" }
 ]

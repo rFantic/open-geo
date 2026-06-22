@@ -26,7 +26,7 @@ def _valid_capture_dict(**overrides) -> dict:
     base = {
         "query": "best orthopedic mattresses",
         "lens": "general",
-        "engine": "google_ai_overview",
+        "engine": "google",
         "captured_at": "2026-06-18T20:15:30Z",
         "overview_present": True,
         "sources": [
@@ -48,7 +48,7 @@ def _fresh_db_with_run(tmp_path, name="aeo.db") -> tuple[str, int]:
     try:
         init_db(conn)
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
     finally:
         conn.close()
     return db_path, run_id
@@ -119,7 +119,7 @@ def test_insert_capture_persists_full_row_and_returns_lastrowid(tmp_path):
             {
                 "query": "best mattress for back sleepers",
                 "lens": "general",
-                "engine": "google_ai_overview",
+                "engine": "google",
                 "captured_at": "2026-06-18T20:15:30Z",
                 "answer_text_md": "Acme is solid.",
                 "screenshot_path": "data/screenshots/1/0.png",
@@ -189,7 +189,7 @@ def test_insert_capture_false_booleans_and_empty_arrays(tmp_path):
             {
                 "query": "no overview here",
                 "lens": "branded",
-                "engine": "google_ai_overview",
+                "engine": "google",
                 "captured_at": "2026-06-18T00:00:00Z",
                 "overview_present": False,
                 "brand_in_answer_text": False,
@@ -216,7 +216,7 @@ def test_insert_capture_unicode_round_trips(tmp_path):
             {
                 "query": "матрасы",
                 "lens": "general",
-                "engine": "google_ai_overview",
+                "engine": "google",
                 "captured_at": "2026-06-18T00:00:00Z",
                 "overview_present": True,
                 "sources": [
@@ -237,7 +237,7 @@ def test_insert_capture_unicode_round_trips(tmp_path):
         conn.close()
 
 
-def test_insert_capture_two_inserts_get_distinct_increasing_ids(tmp_path):
+def test_insert_capture_duplicate_key_is_idempotent_noop(tmp_path):
     db_path, run_id = _fresh_db_with_run(tmp_path)
     conn = get_conn(db_path)
     try:
@@ -245,7 +245,26 @@ def test_insert_capture_two_inserts_get_distinct_increasing_ids(tmp_path):
         id1 = insert_capture(conn, run_id, cap)
         id2 = insert_capture(conn, run_id, cap)
         conn.commit()
-        assert id2 > id1
+        assert isinstance(id1, int) and id1 > 0
+        assert id2 is None
+        assert _results_count(db_path, run_id) == 1
+    finally:
+        conn.close()
+
+
+def test_insert_capture_distinct_keys_each_insert_a_row(tmp_path):
+    db_path, run_id = _fresh_db_with_run(tmp_path)
+    conn = get_conn(db_path)
+    try:
+        a = insert_capture(
+            conn, run_id, QueryCapture.model_validate(_valid_capture_dict(query="a"))
+        )
+        b = insert_capture(
+            conn, run_id, QueryCapture.model_validate(_valid_capture_dict(query="b"))
+        )
+        conn.commit()
+        assert isinstance(a, int) and isinstance(b, int)
+        assert b > a
         assert _results_count(db_path, run_id) == 2
     finally:
         conn.close()
@@ -262,11 +281,11 @@ def test_ingest_batch_all_valid(tmp_path):
     finally:
         conn.close()
 
-    assert result == {"run_id": run_id, "ok": [0, 1, 2], "errors": []}
+    assert result == {"run_id": run_id, "ok": [0, 1, 2], "skipped": [], "errors": []}
 
     run = _run_row(db_path, run_id)
-    assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (3, 3, 0)
-    assert run["status"] == "done"
+    assert run["n_ok"] == 3
+    assert run["status"] == "running"
     assert _results_count(db_path, run_id) == 3
 
 
@@ -296,9 +315,10 @@ def test_ingest_batch_all_invalid(tmp_path):
     assert e1["field"] == "overview_present"
     assert e1["msg"]
 
+    assert result["skipped"] == []
     run = _run_row(db_path, run_id)
-    assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (2, 0, 2)
-    assert run["status"] == "done"
+    assert run["n_ok"] == 0
+    assert run["status"] == "running"
     assert _results_count(db_path, run_id) == 0
 
 
@@ -319,8 +339,10 @@ def test_ingest_batch_mixed_valid_and_invalid_keeps_indices(tmp_path):
     assert result["errors"][0]["query"] == "bad1"
     assert result["errors"][0]["field"] == "lens"
 
+    assert result["skipped"] == []
     run = _run_row(db_path, run_id)
-    assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (3, 2, 1)
+    assert run["n_ok"] == 2
+    assert run["status"] == "running"
     assert _results_count(db_path, run_id) == 2
 
 
@@ -332,10 +354,10 @@ def test_ingest_batch_empty_batch(tmp_path):
     finally:
         conn.close()
 
-    assert result == {"run_id": run_id, "ok": [], "errors": []}
+    assert result == {"run_id": run_id, "ok": [], "skipped": [], "errors": []}
     run = _run_row(db_path, run_id)
-    assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (0, 0, 0)
-    assert run["status"] == "done"
+    assert run["n_ok"] == 0
+    assert run["status"] == "running"
     assert _results_count(db_path, run_id) == 0
 
 
@@ -357,8 +379,10 @@ def test_ingest_batch_non_dict_element_does_not_crash(tmp_path):
         assert err["field"] == ""
         assert err["msg"]
 
+    assert result["skipped"] == []
     run = _run_row(db_path, run_id)
-    assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (3, 1, 2)
+    assert run["n_ok"] == 1
+    assert run["status"] == "running"
     assert _results_count(db_path, run_id) == 1
 
 
@@ -430,7 +454,7 @@ def test_main_new_run_missing_required_arg_returns_2(tmp_path, capsys, missing):
     args = {
         "brand": ["--brand", "Acme"],
         "domain": ["--domain", "acme.com"],
-        "engine": ["--engine", "google_ai_overview"],
+        "engine": ["--engine", "google"],
     }
     argv = ["--db", db_path, "--new-run"]
     for key, flag in args.items():
@@ -450,7 +474,7 @@ def test_main_new_run_creates_brand_and_run(tmp_path, capsys):
             "--db", db_path,
             "--brand", "Acme",
             "--domain", "https://www.acme.com",
-            "--engine", "google_ai_overview",
+            "--engine", "google",
             "--new-run",
         ]
     )
@@ -473,7 +497,7 @@ def test_main_new_run_creates_brand_and_run(tmp_path, capsys):
         run = conn.execute(
             "SELECT engine, status FROM runs WHERE id = ?", (run_id,)
         ).fetchone()
-        assert run["engine"] == "google_ai_overview"
+        assert run["engine"] == "google"
         assert run["status"] == "running"
     finally:
         conn.close()
@@ -514,12 +538,13 @@ def test_main_run_id_valid_batch_ingests_and_prints_payload(
     payload = json.loads(lines[0])
     assert payload["run_id"] == run_id
     assert payload["ok"] == [0, 1]
+    assert payload["skipped"] == []
     assert payload["errors"] == []
 
     assert _results_count(db_path, run_id) == 2
     run = _run_row(db_path, run_id)
-    assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (2, 2, 0)
-    assert run["status"] == "done"
+    assert run["n_ok"] == 2
+    assert run["status"] == "running"
 
 
 def test_main_run_id_valid_batch_with_one_invalid_still_returns_0(
@@ -584,10 +609,10 @@ def test_main_run_id_empty_array_stdin_returns_0(tmp_path, capsys, monkeypatch):
     rc = main(["--db", db_path, "--run-id", str(run_id)])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out.strip())
-    assert payload == {"run_id": run_id, "ok": [], "errors": []}
+    assert payload == {"run_id": run_id, "ok": [], "skipped": [], "errors": []}
     run = _run_row(db_path, run_id)
-    assert run["status"] == "done"
-    assert run["n_queries"] == 0
+    assert run["status"] == "running"
+    assert run["n_ok"] == 0
 
 
 def test_field_path_single_int_part_is_stringified():
@@ -623,7 +648,7 @@ def test_insert_capture_duplicate_domain_sources_and_rank_arrays_preserved(tmp_p
             {
                 "query": "dupes",
                 "lens": "comparative",
-                "engine": "google_ai_overview",
+                "engine": "google",
                 "captured_at": "2026-06-18T20:15:30Z",
                 "overview_present": True,
                 "sources": [
@@ -662,7 +687,7 @@ def test_insert_capture_null_answer_and_screenshot_stored_as_sql_null(tmp_path):
             {
                 "query": "no overview",
                 "lens": "general",
-                "engine": "google_ai_overview",
+                "engine": "google",
                 "captured_at": "2026-06-18T00:00:00Z",
                 "overview_present": False,
                 "brand_in_answer_text": False,
@@ -734,24 +759,61 @@ def test_ingest_batch_assorted_non_dict_elements_become_errors(tmp_path, element
     assert _results_count(db_path, run_id) == 0
 
 
-def test_ingest_batch_is_not_cumulative_second_call_overwrites_counters(tmp_path):
+def test_ingest_batch_incremental_calls_accumulate(tmp_path):
     db_path, run_id = _fresh_db_with_run(tmp_path)
     conn = get_conn(db_path)
     try:
-        ingest_batch(conn, run_id, [_valid_capture_dict(query="a")])
+        r1 = ingest_batch(conn, run_id, [_valid_capture_dict(query="a")])
+        assert r1["ok"] == [0] and r1["skipped"] == []
         run_after_1 = _run_row(db_path, run_id)
-        assert (run_after_1["n_queries"], run_after_1["n_ok"]) == (1, 1)
+        assert run_after_1["n_ok"] == 1
+        assert run_after_1["status"] == "running"
 
-        ingest_batch(
+        r2 = ingest_batch(
             conn,
             run_id,
             [_valid_capture_dict(query="b"), _valid_capture_dict(query="c")],
         )
+        assert r2["ok"] == [0, 1] and r2["skipped"] == []
     finally:
         conn.close()
 
     run_after_2 = _run_row(db_path, run_id)
-    assert (run_after_2["n_queries"], run_after_2["n_ok"], run_after_2["n_failed"]) == (2, 2, 0)
+    assert run_after_2["n_ok"] == 3
+    assert run_after_2["status"] == "running"
+    assert _results_count(db_path, run_id) == 3
+
+
+def test_ingest_batch_resend_same_keys_skips_idempotently(tmp_path):
+    db_path, run_id = _fresh_db_with_run(tmp_path)
+    conn = get_conn(db_path)
+    try:
+        first = ingest_batch(
+            conn,
+            run_id,
+            [
+                _valid_capture_dict(query="a", lens="general"),
+                _valid_capture_dict(query="b", lens="branded"),
+            ],
+        )
+        assert first["ok"] == [0, 1]
+        assert first["skipped"] == []
+
+        again = ingest_batch(
+            conn,
+            run_id,
+            [
+                _valid_capture_dict(query="a", lens="general"),
+                _valid_capture_dict(query="b", lens="branded"),
+                _valid_capture_dict(query="c", lens="comparative"),
+            ],
+        )
+        assert again["ok"] == [2]
+        assert again["skipped"] == [0, 1]
+        assert again["errors"] == []
+    finally:
+        conn.close()
+
     assert _results_count(db_path, run_id) == 3
 
 
@@ -825,7 +887,7 @@ def test_main_new_run_twice_reuses_brand_distinct_runs(tmp_path, capsys):
     base = [
         "--db", db_path,
         "--brand", "Acme", "--domain", "acme.com",
-        "--engine", "google_ai_overview", "--new-run",
+        "--engine", "google", "--new-run",
     ]
     assert main(base) == 0
     run_id_1 = json.loads(capsys.readouterr().out.strip())["run_id"]
@@ -854,7 +916,7 @@ def test_main_new_run_creates_missing_parent_directories(tmp_path, capsys):
         [
             "--db", str(nested),
             "--brand", "Acme", "--domain", "acme.com",
-            "--engine", "google_ai_overview", "--new-run",
+            "--engine", "google", "--new-run",
         ]
     )
     assert rc == 0
@@ -896,11 +958,12 @@ def test_main_run_id_valid_with_all_invalid_batch_returns_0(tmp_path, capsys, mo
     assert rc == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["ok"] == []
+    assert payload["skipped"] == []
     assert len(payload["errors"]) == 2
     assert _results_count(db_path, run_id) == 0
     run = _run_row(db_path, run_id)
-    assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (2, 0, 2)
-    assert run["status"] == "done"
+    assert run["n_ok"] == 0
+    assert run["status"] == "running"
 
 
 def test_main_run_id_whitespace_only_stdin_returns_1(tmp_path, capsys, monkeypatch):
@@ -941,7 +1004,7 @@ def test_main_subprocess_new_run_then_ingest_end_to_end(tmp_path):
             sys.executable, "-m", "pipeline.ingest",
             "--db", str(db_path),
             "--brand", "Acme", "--domain", "acme.com",
-            "--engine", "google_ai_overview", "--new-run",
+            "--engine", "google", "--new-run",
         ],
         cwd=str(REPO_ROOT),
         capture_output=True,
@@ -964,6 +1027,7 @@ def test_main_subprocess_new_run_then_ingest_end_to_end(tmp_path):
     payload = json.loads(ingested.stdout)
     assert payload["run_id"] == run_id
     assert payload["ok"] == [0]
+    assert payload["skipped"] == []
     assert payload["errors"] == []
 
 

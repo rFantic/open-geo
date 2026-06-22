@@ -21,8 +21,9 @@ import {
 } from "./components/primitives";
 import { MetricsChart } from "./components/MetricsChart";
 import { LensBreakdown } from "./components/LensBreakdown";
+import { LensSentiment } from "./components/LensSentiment";
 import { ResultsTable } from "./components/ResultsTable";
-import { DownloadIcon } from "./components/icons";
+import { ChevronDownIcon, DownloadIcon } from "./components/icons";
 
 const LENSES = ["all", "general", "branded", "comparative"] as const;
 
@@ -43,6 +44,7 @@ function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [resultsExpanded, setResultsExpanded] = useState(false);
 
   useEffect(() => {
     api
@@ -238,42 +240,80 @@ function Dashboard() {
         ))}
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <div className="xl:col-span-2">
-          <Panel
-            title={t("dashboard.chart_title")}
-            info={t("dashboard.chart_info")}
-            right={
-              <span className="text-xs text-[var(--muted)]">
-                {t("dashboard.chart_lens", { lens: t(`lens.${lens}`) })}
-              </span>
-            }
-          >
-            <MetricsChart points={timeseries?.points ?? []} />
-          </Panel>
-        </div>
+      {period === "all" && (
         <Panel
-          title={t("dashboard.lens_panel_title")}
-          info={t("dashboard.lens_panel_info")}
+          title={t("dashboard.chart_title")}
+          info={t("dashboard.chart_info")}
+          className="mb-6"
+          right={
+            <span className="text-xs text-[var(--muted)]">
+              {t("dashboard.chart_lens", { lens: t(`lens.${lens}`) })}
+            </span>
+          }
         >
-          <LensBreakdown rows={metrics?.metrics ?? []} />
+          <MetricsChart points={timeseries?.points ?? []} />
         </Panel>
-      </div>
+      )}
+
+      <Panel
+        title={t("dashboard.lens_panel_title")}
+        info={t("dashboard.lens_panel_info")}
+        className="mb-6"
+      >
+        <LensBreakdown rows={metrics?.metrics ?? []} />
+      </Panel>
+
+      <Panel
+        title={t("dashboard.sentiment_panel_title")}
+        info={t("dashboard.sentiment_panel_info")}
+        className="mb-6"
+      >
+        <LensSentiment rows={metrics?.metrics ?? []} />
+      </Panel>
 
       <Panel
         title={t("dashboard.results_title")}
         right={
-          results?.run ? (
-            <span className="text-xs text-[var(--muted)]">
-              {t("dashboard.results_meta", {
-                id: results.run.run_id,
-                n: results.results.length,
-              })}
-            </span>
-          ) : undefined
+          <div className="flex items-center gap-3">
+            {results?.run && (
+              <span className="text-xs text-[var(--muted)]">
+                {t("dashboard.results_meta", {
+                  id: results.run.run_id,
+                  n: results.results.length,
+                })}
+              </span>
+            )}
+            {(results?.results.length ?? 0) > 0 && (
+              <button
+                type="button"
+                aria-expanded={resultsExpanded}
+                aria-controls="results-table-region"
+                onClick={() => setResultsExpanded((v) => !v)}
+                className="inline-flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm text-[var(--muted)] transition-colors hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+              >
+                {resultsExpanded
+                  ? t("dashboard.results_collapse")
+                  : t("dashboard.results_expand")}
+                <ChevronDownIcon
+                  size={16}
+                  className={`transition-transform ${resultsExpanded ? "rotate-180" : ""}`}
+                />
+              </button>
+            )}
+          </div>
         }
       >
-        <ResultsTable rows={results?.results ?? []} />
+        <div id="results-table-region">
+          {(results?.results.length ?? 0) === 0 || resultsExpanded ? (
+            <ResultsTable rows={results?.results ?? []} />
+          ) : (
+            <p className="text-sm text-[var(--muted)]">
+              {t("dashboard.results_collapsed_hint", {
+                n: results?.results.length ?? 0,
+              })}
+            </p>
+          )}
+        </div>
       </Panel>
 
       <footer className="mt-8 text-xs text-[var(--faint)]">

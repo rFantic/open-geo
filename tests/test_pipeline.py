@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import json
 import subprocess
 import sys
@@ -15,13 +16,14 @@ from pipeline.schema import QueryCapture, normalize_domain
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYTHON = sys.executable
+_CAP_SEQ = itertools.count()
 
 
 def _valid_capture_dict() -> dict:
     return {
         "query": "best orthopedic mattresses",
         "lens": "general",
-        "engine": "google_ai_overview",
+        "engine": "google",
         "captured_at": "2026-06-18T20:15:30Z",
         "overview_present": True,
         "sources": [
@@ -78,7 +80,7 @@ def _new_run(db_path: Path) -> int:
             str(PYTHON), "-m", "pipeline.ingest",
             "--db", str(db_path),
             "--brand", "Acme", "--domain", "acme.com",
-            "--engine", "google_ai_overview", "--new-run",
+            "--engine", "google", "--new-run",
         ],
         cwd=str(REPO_ROOT),
         capture_output=True,
@@ -115,6 +117,7 @@ def test_ingest_happy_path(tmp_path):
 
     assert result["run_id"] == run_id
     assert result["ok"] == [0, 1]
+    assert result["skipped"] == []
     assert result["errors"] == []
 
     conn = get_conn(str(db_path))
@@ -125,11 +128,11 @@ def test_ingest_happy_path(tmp_path):
         assert n_results == 2
 
         run = conn.execute(
-            "SELECT n_queries, n_ok, n_failed, status FROM runs WHERE id = ?",
+            "SELECT n_ok, status FROM runs WHERE id = ?",
             (run_id,),
         ).fetchone()
-        assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (2, 2, 0)
-        assert run["status"] == "done"
+        assert run["n_ok"] == 2
+        assert run["status"] == "running"
     finally:
         conn.close()
 
@@ -162,9 +165,10 @@ def test_ingest_error_feedback(tmp_path):
         assert [r["query"] for r in rows] == [good["query"]]
 
         run = conn.execute(
-            "SELECT n_queries, n_ok, n_failed FROM runs WHERE id = ?", (run_id,)
+            "SELECT n_ok, status FROM runs WHERE id = ?", (run_id,)
         ).fetchone()
-        assert (run["n_queries"], run["n_ok"], run["n_failed"]) == (2, 1, 1)
+        assert run["n_ok"] == 1
+        assert run["status"] == "running"
     finally:
         conn.close()
 
@@ -186,9 +190,9 @@ def _cap(
     ]
     return QueryCapture.model_validate(
         {
-            "query": f"{lens}-q",
+            "query": f"{lens}-q{next(_CAP_SEQ)}",
             "lens": lens,
-            "engine": "google_ai_overview",
+            "engine": "google",
             "captured_at": "2026-06-18T00:00:00Z",
             "overview_present": overview,
             "sources": sources,
@@ -207,7 +211,7 @@ def test_aggregate_math(tmp_path):
     try:
         init_db(conn)
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
 
         caps = [
             _cap(lens="general", overview=True, source_ranks=[2, 4], citation_ranks=[2]),
@@ -271,7 +275,7 @@ def test_funnel_relative_citation(tmp_path):
     try:
         init_db(conn)
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
 
         caps = [
             _cap(lens="general", overview=True, source_ranks=[1], citation_ranks=[1]),
@@ -342,7 +346,7 @@ def test_aggregate_run_persists_and_is_idempotent(tmp_path):
     try:
         init_db(conn)
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
 
         caps = [
             _cap(lens="general", overview=True, source_ranks=[1, 3], citation_ranks=[1]),
@@ -357,7 +361,7 @@ def test_aggregate_run_persists_and_is_idempotent(tmp_path):
 
         assert summary["run_id"] == run_id
         assert summary["brand_id"] == brand_id
-        assert summary["engine"] == "google_ai_overview"
+        assert summary["engine"] == "google"
         lenses = [m["lens"] for m in summary["metrics"]]
         assert lenses[0] == "all"
         assert set(lenses) == {"all", "general", "branded"}
@@ -391,7 +395,7 @@ def test_aggregate_empty_scope_overview_coverage_null(tmp_path):
     try:
         init_db(conn)
         brand_id = get_or_create_brand(conn, "Acme", "acme.com")
-        run_id = create_run(conn, brand_id, "google_ai_overview")
+        run_id = create_run(conn, brand_id, "google")
 
         rows = compute_run_metrics(conn, run_id)
         assert [r["lens"] for r in rows] == ["all"]

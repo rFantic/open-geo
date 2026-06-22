@@ -14,6 +14,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from pipeline.db import get_lens_sentiments
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _METRIC_COLS = (
@@ -168,6 +170,12 @@ def metrics(
     try:
         if period == "all":
             out_rows = _aggregate_period(conn, brand_id, engine, lens)
+            latest_done_id = _latest_run_id(conn, brand_id, engine, only_done=True)
+            summaries = (
+                get_lens_sentiments(conn, latest_done_id) if latest_done_id else {}
+            )
+            for payload in out_rows:
+                payload["sentiment_summary"] = summaries.get(payload["lens"])
             out_rows.sort(key=lambda r: (order.get(r["lens"], 99), r["lens"]))
             n_runs = conn.execute(
                 "SELECT COUNT(*) AS c FROM runs WHERE brand_id=? AND engine=? AND status='done'",
@@ -201,6 +209,7 @@ def metrics(
         )
         cur_by_lens = _metrics_by_lens(conn, run_id)
         prev_by_lens = _metrics_by_lens(conn, prev_id) if prev_id else {}
+        summaries = get_lens_sentiments(conn, run_id)
 
         prev_run = None
         if prev_id:
@@ -217,6 +226,7 @@ def metrics(
             payload: dict[str, Any] = {"lens": lns}
             for col in _METRIC_COLS:
                 payload[col] = row.get(col)
+            payload["sentiment_summary"] = summaries.get(lns)
             prev_row = prev_by_lens.get(lns)
             for m in _DELTA_METRICS:
                 cur_v = row.get(m)

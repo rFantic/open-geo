@@ -302,16 +302,32 @@ describe("RedesignApp — initial load", () => {
     expect(kpis.getByText("4.00")).toBeInTheDocument();
   });
 
-  it("renders the metrics chart (timeseries points present) and lens + results tables", async () => {
+  it("latest-run view hides the trend chart but still renders lens + results tables", async () => {
+    const user = userEvent.setup();
     installFetch();
     const { container } = render(<RedesignApp />);
     await waitFor(() => expect(screen.getByText(/Run #42/)).toBeInTheDocument());
+    expect(container.querySelector(".recharts-responsive-container")).toBeNull();
+    expect(screen.queryByText("Trend across runs")).not.toBeInTheDocument();
+    expect(screen.getByText(/run #42 · 2 rows/)).toBeInTheDocument();
+    expect(screen.queryByText("best running shoes")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Expand" }));
+    expect(screen.getByText("best running shoes")).toBeInTheDocument();
+    expect(screen.getByText("acme vs globex")).toBeInTheDocument();
+  });
+
+  it("trend chart is hidden in latest-run and revealed when switching to whole-period", async () => {
+    const user = userEvent.setup();
+    installFetch();
+    const { container } = render(<RedesignApp />);
+    await waitFor(() => expect(screen.getByText(/Run #42/)).toBeInTheDocument());
+    expect(container.querySelector(".recharts-responsive-container")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Whole period" }));
     await waitFor(() =>
       expect(container.querySelector(".recharts-responsive-container")).toBeTruthy(),
     );
-    expect(screen.getByText("best running shoes")).toBeInTheDocument();
-    expect(screen.getByText("acme vs globex")).toBeInTheDocument();
-    expect(screen.getByText(/run #42 · 2 rows/)).toBeInTheDocument();
+    expect(screen.getByText("Trend across runs")).toBeInTheDocument();
   });
 
   it("sets aria-busy=false once loading settles", async () => {
@@ -344,8 +360,7 @@ describe("RedesignApp — empty & null states", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(callsTo(calls, "/api/runs").length).toBe(0);
     expect(callsTo(calls, "/api/metrics").length).toBe(0);
-    expect(screen.getByText("No completed runs to plot a trend.")).toBeInTheDocument();
-    expect(screen.getByText("No metrics for the selected run.")).toBeInTheDocument();
+    expect(screen.getAllByText("No metrics for the selected run.")).toHaveLength(2);
     expect(
       screen.getByText("No result rows for the selected run / lens."),
     ).toBeInTheDocument();
@@ -375,9 +390,12 @@ describe("RedesignApp — empty & null states", () => {
     expect(screen.queryByText(/compared with/)).not.toBeInTheDocument();
   });
 
-  it("empty timeseries points -> chart empty-state copy", async () => {
+  it("empty timeseries points in whole-period view -> chart empty-state copy", async () => {
+    const user = userEvent.setup();
     installFetch({ timeseries: () => jsonResponse(makeTimeseries([])) });
     render(<RedesignApp />);
+    await waitFor(() => expect(screen.getByText(/Run #42/)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Whole period" }));
     await waitFor(() =>
       expect(screen.getByText("No completed runs to plot a trend.")).toBeInTheDocument(),
     );

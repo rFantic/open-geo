@@ -13,7 +13,7 @@ def _min_capture() -> dict:
     return {
         "query": "best orthopedic mattresses",
         "lens": "general",
-        "engine": "google_ai_overview",
+        "engine": "google",
         "captured_at": "2026-06-18T20:15:30Z",
         "overview_present": True,
         "brand_in_answer_text": False,
@@ -240,7 +240,7 @@ def test_query_capture_full_valid_object():
     data = {
         "query": "best mattress for back sleepers",
         "lens": "comparative",
-        "engine": "google_ai_overview",
+        "engine": "google",
         "captured_at": "2026-06-18T20:15:30Z",
         "answer_text_md": "**Acme** offers several suitable options...",
         "screenshot_path": "data/screenshots/42/0003.png",
@@ -260,7 +260,7 @@ def test_query_capture_full_valid_object():
     cap = QueryCapture.model_validate(data)
     assert cap.query == data["query"]
     assert cap.lens == "comparative"
-    assert cap.engine == "google_ai_overview"
+    assert cap.engine == "google"
     assert cap.overview_present is True
     assert cap.brand_in_answer_text is True
     assert cap.answer_text_md == data["answer_text_md"]
@@ -397,7 +397,7 @@ def test_query_capture_model_validate_dump_round_trip():
     data = {
         "query": "round trip",
         "lens": "branded",
-        "engine": "google_ai_overview",
+        "engine": "google",
         "captured_at": "2026-06-18T20:15:30Z",
         "answer_text_md": "text",
         "screenshot_path": "data/s/0.png",
@@ -706,7 +706,7 @@ def test_query_capture_full_object_json_round_trip():
         {
             "query": "best mattress",
             "lens": "comparative",
-            "engine": "google_ai_overview",
+            "engine": "google",
             "captured_at": "2026-06-18T20:15:30+00:00",
             "answer_text_md": "**Acme** is solid.",
             "screenshot_path": "data/s/1.png",
