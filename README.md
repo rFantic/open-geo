@@ -22,15 +22,20 @@ logged-in browser and records whether your domain makes it into the **sources**,
 
 - **It reads the answer like a human, not an API.** Capture runs through Claude-in-Chrome in a
   real, logged-in browser — it sees the _rendered_ AI answer (the sources panel and the inline
-  citation chips), normalizes domains, and emits one validated record per query. No brittle
-  scraping of a surface no engine ever promised to keep stable.
+  citation chips), normalizes domains, and emits one validated record per query. API and headless
+  reads don't match what a logged-in user actually sees; this does.
+- **Adapts instead of breaking.** Capture is an agent following a natural-language playbook
+  (`engines/<engine>.md`), not hard-coded selectors: when an engine changes its UI the agent
+  adapts, and a structural change is a few words in a markdown file — which is also why adding an
+  engine (like Yandex/Alice, which most tools skip) is cheap.
 - **A visibility funnel, not a vanity score.** Six metrics that nest as a funnel — answer →
   sources → citations — plus a qualitative sentiment read **and a top-domains leaderboard** (your
   brand ranked against every other domain in the answers). **No composite index, no made-up
   share-of-voice *index*.** Every number is auditable to [`pipeline/INTERFACES.md`](pipeline/INTERFACES.md).
 - **Local-first, multi-brand time-series.** Captures land in a local SQLite (WAL) database, so you
   build per-brand, per-engine history and run-over-run deltas. Deliverables are a themed **PDF** and
-  a **FastAPI + React dashboard** with a four-language switcher. Your data never leaves your machine.
+  a **FastAPI + React dashboard** with a four-language switcher. No SaaS and no account — you run it
+  yourself, so the methodology is yours to inspect and reproduce.
 
 ### Who this is for
 
@@ -38,6 +43,8 @@ logged-in browser and records whether your domain makes it into the **sources**,
   visibility instead of "AI search matters, trust me."
 - **In-house growth / SEO at a brand** — track your own domain's presence in AI answers over time,
   split by query lens (general / branded / comparative), and catch week-over-week drift.
+- **Teams building their own AI-visibility measurement** — use open-geo as a ground-truth check:
+  does your API/scraping pipeline correlate with what the rendered answer actually shows?
 - **Founders & devs already in Claude Code** — it's just a skill: point `/open-geo` at a CSV and a
   domain, get a dashboard. No SaaS, no upload, no account.
 
@@ -260,10 +267,11 @@ it to see the format, then replace it with yours.
 No external data API and no paid keys. You need **Claude Code**, the **Claude-in-Chrome** extension
 connected, and a **browser already logged in** to the engine / market you want to track.
 
-### Does my data leave my machine?
-No. Every run is stored in a local **SQLite (WAL) database** at `data/aeo.db`, and the deliverables
-are a **local PDF** and a **local dashboard** you run yourself. There is no SaaS, no upload, and no
-account.
+### Is there a cloud service or an account?
+No. open-geo is a local tool: every run is stored in a local **SQLite (WAL) database** at
+`data/aeo.db`, and the deliverables are a **local PDF** and a **local dashboard** you run yourself.
+There is no SaaS and no account, so the methodology is yours to inspect and reproduce. (Capture
+itself runs through Claude Code / Claude-in-Chrome, so it is not an offline or air-gapped tool.)
 
 ### Why six metrics and no single score?
 Because they form a **funnel** (answer → sources → citations), and collapsing it into one number
