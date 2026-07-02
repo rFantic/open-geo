@@ -24,17 +24,17 @@ def test_link_target_domain_uses_catalog_path():
 
 
 def test_link_other_domain_uses_www_path():
-    link = sd._link(7, "wirecutter.com", "article-7")
-    assert link.url == "https://www.wirecutter.com/article-7"
+    link = sd._link(7, "umbrellasoft.com", "article-7")
+    assert link.url == "https://www.umbrellasoft.com/article-7"
     assert link.rank == 7
-    assert link.domain == "wirecutter.com"
+    assert link.domain == "umbrellasoft.com"
 
 
 def test_link_returns_valid_link_model():
     a = sd._link(1, TARGET, "s")
-    b = sd._link(2, "ikea.com", "s")
+    b = sd._link(2, "soylentlabs.com", "s")
     assert isinstance(a.rank, int) and isinstance(b.rank, int)
-    assert a.domain == TARGET and b.domain == "ikea.com"
+    assert a.domain == TARGET and b.domain == "soylentlabs.com"
 
 
 def test_build_sources_ranks_contiguous_1_to_n():
@@ -472,9 +472,9 @@ def test_link_slug_is_inserted_verbatim_target_branch():
 
 
 def test_link_slug_is_inserted_verbatim_other_branch():
-    link = sd._link(9, "reddit.com", "r/ProjectManagement")
-    assert link.url == "https://www.reddit.com/r/ProjectManagement"
-    assert link.rank == 9 and link.domain == "reddit.com"
+    link = sd._link(9, "piedpiper.com", "r/ProjectManagement")
+    assert link.url == "https://www.piedpiper.com/r/ProjectManagement"
+    assert link.rank == 9 and link.domain == "piedpiper.com"
 
 
 def test_link_target_match_is_exact_not_substring():

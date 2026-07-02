@@ -29,13 +29,13 @@ _OTHER_DOMAINS = [
     "globex.com",
     "initech.com",
     "hooli.com",
-    "g2.com",
-    "capterra.com",
-    "trustpilot.com",
-    "reddit.com",
-    "techradar.com",
-    "pcmag.com",
-    "producthunt.com",
+    "piedpiper.com",
+    "umbrellasoft.com",
+    "soylentlabs.com",
+    "acmeretail.com",
+    "vandelay-reviews.com",
+    "wonkatech.com",
+    "cyberdyne-picks.com",
 ]
 
 _QUERIES = {

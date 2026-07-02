@@ -18,6 +18,11 @@ logged-in browser and records whether your domain makes it into the **sources**,
 [![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
+<p align="center">
+  <img src="assets/demo.gif" alt="open-geo dashboard tour — six KPI cards with run-over-run deltas, breakdown by lens, top-domains leaderboard and the language switcher" width="100%">
+</p>
+<p align="center"><sub>The dashboard on the seeded demo brand — KPI funnel, per-lens breakdown, top-domains leaderboard.</sub></p>
+
 ### Why open-geo
 
 - **It reads the answer like a human, not an API.** Capture runs through Claude-in-Chrome in a

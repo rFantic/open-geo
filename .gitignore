@@ -18,6 +18,8 @@
 /LAUNCH.md
 /LAUNCH_POSTS.md
 /*_smoke.csv
+# Dogfood run notes (opengeo.pro measuring itself) — operational, maintainer-only.
+/RUNBOOK-DOGFOOD.md
 # Marketing / demo-video production (shot list, card generators, footage) —
 # promo material, not part of the product. Kept local.
 /media/

@@ -18,6 +18,11 @@ Claude, Google AI Overview, Yandex, DeepSeek. Каждый ответ опира
 [![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Тур по дашборду open-geo — шесть KPI-карточек с дельтами, разбивка по срезам, лидерборд топ-доменов и переключатель языка" width="100%">
+</p>
+<p align="center"><sub>Дашборд на демо-бренде — воронка KPI, разбивка по срезам, лидерборд топ-доменов.</sub></p>
+
 ### Почему open-geo
 
 - **Он читает ответ как человек, а не как API.** Захват идёт через Claude-in-Chrome в

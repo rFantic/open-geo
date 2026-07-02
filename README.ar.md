@@ -18,6 +18,11 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
+<p align="center">
+  <img src="assets/demo.gif" alt="جولة في لوحة open-geo — ست بطاقات مؤشرات مع فروقات بين التشغيلات، وتفصيل حسب العدسة، ولوحة صدارة أهم النطاقات ومبدّل اللغة" width="100%">
+</p>
+<p align="center"><sub>اللوحة على العلامة التجريبية — قمع المؤشرات، التفصيل حسب العدسة، ولوحة صدارة أهم النطاقات.</sub></p>
+
 ### لماذا open-geo
 
 - **يقرأ الإجابة كما يقرؤها الإنسان، لا كواجهة برمجية.** يجري الالتقاط عبر Claude-in-Chrome في

@@ -18,6 +18,11 @@ Claude、Google AI Overview、Yandex、DeepSeek。每条回答都依赖少数几
 [![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
+<p align="center">
+  <img src="assets/demo.gif" alt="open-geo 仪表盘导览——六张带环比增减的 KPI 卡片、按视角细分、热门域名排行榜和语言切换器" width="100%">
+</p>
+<p align="center"><sub>演示品牌上的仪表盘——KPI 漏斗、按视角细分、热门域名排行榜。</sub></p>
+
 ### 为什么选 open-geo
 
 - **它像人一样读回答，而不是像 API。** 捕获过程通过 Claude-in-Chrome 在一个
