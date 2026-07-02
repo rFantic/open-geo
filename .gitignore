@@ -48,6 +48,7 @@ data/*.db-wal
 data/*.db-shm
 data/*.sqlite
 data/*.sqlite3
+data/*.bak*
 # throwaway fixture DBs (e.g. data/_fixture_dash.db)
 data/_*.db
 
@@ -105,5 +106,17 @@ Thumbs.db
 # The canonical shared sample is examples/questions.csv (kept committed). Drop
 # your own real or scratch query lists here without committing them.
 examples/test_queries.csv
-# Real-market audit inputs (the user's own questions.csv, not the Example demo).
+# Real-market audit inputs (the user's own questions.csv, not the Example demo),
+# plus their harvest provenance docs (<name>_rationale.md).
 /mattress_questions.csv
+/dogfood_questions.csv
+/*_questions*.csv
+/*_rationale.md
+
+# Growth content pack (draft posts) + outreach/recon notes — kept local,
+# not part of the public repo.
+/GROWTH_PACK.md
+/GROWTH.md
+/OUTREACH_*.md
+/*_RECON_HANDOFF.md
+/vc_posts/
