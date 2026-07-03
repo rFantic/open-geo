@@ -105,7 +105,10 @@ picks the top-`limit` (default 15); the web UI re-sorts those rows client-side o
 with sentiment, the read-only API never calls `init_db`, so a DB predating `domain_stats` returns
 an empty `domains: []` (catching `no such table`) instead of erroring. The web UI surfaces this as a
 **"Top domains in answer space"** panel (the brand row highlighted with a "you" badge); the PDF
-report carries the same as its top-domains section.
+report carries the same as its top-domains section. Note: the leaderboard aggregates by registrable
+domain regardless of the `<domain>` argument — when the target is a URL prefix
+(`github.com/user/repo`), the "you" row highlights the **full target domain** (`github.com`), which
+is broader than the prefix; the funnel metrics (sources/citations) remain prefix-exact.
 
 The frontend shows the **Trend across runs** chart only in the `all` (whole-period) view; the
 `today` (latest-run) view is a pure snapshot — KPI cards with read-time deltas, no trend chart.

@@ -127,7 +127,7 @@ Python: Claude orchestrates capture → metrics → deliverables and hands you a
 |---|---|
 | `<questions.csv>` | CSV with columns **`query,lens`**, where `lens ∈ general \| branded \| comparative`. Ready sample: `examples/questions.csv`. |
 | `<engine>` | which AI engine to track (e.g. `google`). The same slot takes any engine that has a capture playbook under `engines/`. |
-| `<domain>` | the target domain (any spelling: `https://www.example.com`, `example.com` — normalized automatically). |
+| `<domain>` | the target domain **or URL prefix** (`github.com`, `github.com/user`, `github.com/user/repo`; any spelling — normalized automatically). |
 | `--brand "<name>"` | human brand name (used in report/dashboard titles and the summary). |
 | `--n-worker <N>` | number of capture workers run **in parallel** — the run's concurrency. |
 | `--output` | `dashboard` (default) \| `pdf` \| `both`. |
@@ -168,10 +168,10 @@ see [`engines/README.md`](engines/README.md).
 - **Queries** — the questions you feed in (your CSV).
 - **AI Overview** — the queries where the engine actually generated an AI answer (it doesn't
   always — and an absence is valid data, not a failure).
-- **In sources** — of those, the queries where your domain was among the **sources** the answer
-  drew on.
-- **Cited** — of those, the queries where your domain was actually **linked/cited** in the answer
-  text.
+- **In sources** — of those, the queries where your target (domain or URL prefix) was among the
+  **sources** the answer drew on.
+- **Cited** — of those, the queries where your target (domain or URL prefix) was actually
+  **linked/cited** in the answer text.
 
 Each step is a subset of the one before it, so the counts nest:
 `n_cited ≤ n_in_sources ≤ n_overviews ≤ n_queries`. (Citations are a subset of sources because the
