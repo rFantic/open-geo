@@ -265,25 +265,33 @@ Three distinct states:
   (`pipeline/schema.py`): strip scheme / userinfo / path / query / fragment / port and
   a leading `www.`, **lowercase**, keep the **registrable domain** (last two labels,
   e.g. `blog.example.com → example.com`; multi-part suffixes like `co.uk`, `ne.jp`
-  preserved → three labels). Apply the **same** function to the given target `domain`
-  so matching is consistent.
-- A link **matches the target** iff its normalized `domain` **equals** the normalized
-  target domain (exact string equality after normalization).
-- **A brand-adjacent label or URL is NOT a match — only the registrable domain
-  counts.** A chip/card whose visible label or URL *path* mentions the brand does not
-  match unless its normalized registrable domain equals the target. Verified examples
-  for target `anthropic.com`: a "Claude Console" chip resolves to
+  preserved → three labels).
+- The target is a **domain OR URL-prefix** (e.g. `anthropic.com` or
+  `github.com/Pupok462`). A link **matches the target** iff (a) its registrable domain
+  equals the target's registrable domain, **and** (b) if the target has a path, the
+  target's path segments are a case-insensitive **prefix** of the link URL's path
+  segments. A target with no path keeps the old domain-only behaviour. If the target has
+  a path and the link's full URL is unavailable (domain-only chip) or is a redirect
+  wrapper (`normalize_domain(url) ≠ link.domain`), it is **NOT** a match — never
+  silently over-credit.
+- **A brand-adjacent label or URL path on a DIFFERENT domain is NOT a match.**
+  A mention of the brand name in a link's display label or in its URL path does NOT cause
+  a match unless the link's registrable domain matches the target's. This applies when the
+  target itself has no path (domain-only behaviour) AND when the target has a path (path
+  prefix is checked only on the target's own domain, not others'). Verified examples for
+  target `anthropic.com`: a "Claude Console" chip resolves to
   `platform.claude.com → claude.com` (**not** a match); a card at
   `lorka.ai/ai-models/anthropic` is `lorka.ai` (**not** a match); only chips whose card
-  URL is on `www.anthropic.com → anthropic.com` match. Always read the `href` and
-  `normalize_domain` it — never match on the chip's display name.
+  URL is on `www.anthropic.com → anthropic.com` match. Always read the `href` and run
+  `normalize_domain` on it — never match on the chip's display name.
 
 ### 7. Compute `target_source_ranks` and `target_citation_ranks`
-- `target_source_ranks` = **every** 1-based position in `sources` whose `domain`
-  equals the target domain, in **ascending** order (e.g. `[2, 4]`). `[]` if it never
-  appears in `sources`.
-- `target_citation_ranks` = the same, computed over `citations`. `[]` if absent.
-- These are positions **within each respective list**, not global.
+- Both arrays are computed **deterministically** by
+  `pipeline.schema.target_ranks(links, target)` — the self-validation step
+  (capture-worker instructions) overwrites whatever you put in the JSON with the
+  authoritative result. You do not need to count by hand.
+- `target_source_ranks` = every 1-based position in `sources` that matches the target
+  (ascending); `[]` if never. `target_citation_ranks` = the same over `citations`.
 - **Consistency check (citations ⊆ sources):** if `target_citation_ranks` is
   non-empty, `target_source_ranks` **must** be non-empty too. A cited target with
   empty `target_source_ranks` is a capture bug — fix it by folding the cited link into

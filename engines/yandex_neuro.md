@@ -226,17 +226,25 @@ Three distinct states:
   (`pipeline/schema.py`): strip scheme / userinfo / path / query / fragment / port and a
   leading `www.`, **lowercase**, keep the **registrable domain** (last two labels, e.g.
   `blog.example.com → example.com`; multi-part suffixes like `co.uk` preserved → three
-  labels). Apply the **same** function to the given target `domain` so matching is
-  consistent.
-- A link **matches the target** iff its normalized `domain` **equals** the normalized
-  target domain (exact string equality after normalization).
+  labels).
+- The target is a **domain OR URL-prefix** (e.g. `example.com` or `github.com/Pupok462`).
+  A link **matches the target** iff (a) its registrable domain equals the target's
+  registrable domain, **and** (b) if the target has a path, the target's path segments are a
+  case-insensitive **prefix** of the link URL's path segments. A target with no path keeps
+  the old domain-only behaviour. If the target has a path and the link's full URL is
+  unavailable (domain-only chip) or is a redirect wrapper
+  (`normalize_domain(url) ≠ link.domain`), it is **NOT** a match — never silently
+  over-credit. (Yandex URLs are direct, so redirect wrappers are rare here.)
+- **Exclude promotional/ad links** (Промо-карточки — `ozon.ru`, `market.yandex.ru`, etc.)
+  from `sources`/`citations` before matching — these are ads, not organic sources.
 
 ### 6. Compute `target_source_ranks` and `target_citation_ranks`
-- `target_source_ranks` = **every** 1-based position in `sources` whose `domain` equals
-  the target domain, in **ascending** order. A domain can appear more than once → list all
-  (e.g. `[2, 4]`). `[]` if it never appears in `sources`.
-- `target_citation_ranks` = the same, computed over `citations`. `[]` if absent.
-- These are positions **within each respective list**, not global.
+- Both arrays are computed **deterministically** by
+  `pipeline.schema.target_ranks(links, target)` — the self-validation step
+  (capture-worker instructions) overwrites whatever you put in the JSON with the
+  authoritative result. You do not need to count by hand.
+- `target_source_ranks` = every 1-based position in `sources` that matches the target
+  (ascending); `[]` if never. `target_citation_ranks` = the same over `citations`.
 - **Consistency check (citations ⊆ sources):** if `target_citation_ranks` is non-empty,
   then `target_source_ranks` **must** be non-empty too (you cited the target, so it is
   also a source — fold it into `sources` per step 3 if the panel didn't list it). A cited

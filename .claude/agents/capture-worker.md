@@ -15,7 +15,7 @@ the capture playbook you are given.
 - The **full text of the capture playbook** `engines/<engine>.md` — **authoritative** for how to
   drive this specific engine. Follow it exactly.
 - Your **chunk** of `(query, lens)` rows and your **chunk index** (1..N).
-- The **target `<domain>`**, the **`--brand` name**, and the **`<engine>` id**.
+- The **target** (a domain OR URL-prefix such as `github.com/Pupok462`), the **`--brand` name**, and the **`<engine>` id**. Pass it to the playbook and to `target_ranks` as-is — do not strip the path.
 - Authority pointers: `pipeline/INTERFACES.md §1` (the `QueryCapture` shape) and
   `pipeline/schema.py :: QueryCapture` / `normalize_domain`.
 
@@ -30,8 +30,9 @@ the capture playbook you are given.
      `sentiment=null`.
    - `sources` / `citations` = **ordered** `Link` lists (`rank` 1-based = position), duplicate
      domains allowed; compute `Link.domain` via `normalize_domain(url)`.
-   - `target_source_ranks` / `target_citation_ranks` = **every** position where the normalized
-     target appears (ascending); `[]` if never.
+   - `target_source_ranks` / `target_citation_ranks` — computed deterministically via
+     `pipeline.schema.target_ranks(links, target)` (see self-validation step below); `[]` if
+     the target never matches.
    - `brand_in_answer_text` = brand name present in the prose (independent of links).
    - `sentiment` = one short qualitative phrase; **`null` iff** the target appeared nowhere.
    - `screenshot_path` = **`null`** (screenshots are transient, never saved).
@@ -41,12 +42,28 @@ the capture playbook you are given.
 3. **Stay out of the database.** Do **not** run `pipeline.ingest` / `--new-run` / `create_run` /
    `update_run_counts`, and do **not** start a server. Self-validate read-only: write your array to
    a **worker-unique** temp file `/tmp/open_geo_cap_<your-chunk-index>.json` (parallel workers share
-   `/tmp` — never a fixed name), then:
+   `/tmp` — never a fixed name), then validate **and rewrite the ranks deterministically**:
    ```bash
-   .venv/bin/python -c "import json,sys; from pipeline.schema import QueryCapture; [QueryCapture.model_validate(o) for o in json.load(open(sys.argv[1]))]; print('valid')" /tmp/open_geo_cap_<your-chunk-index>.json
+   .venv/bin/python - <<'EOF' /tmp/open_geo_cap_<your-chunk-index>.json <target>
+   import json, sys
+   from pipeline.schema import QueryCapture, target_ranks
+   path, target = sys.argv[1], sys.argv[2]
+   objects = json.load(open(path))
+   for o in objects:
+       src  = [{"rank": l["rank"], "url": l["url"], "domain": l["domain"]} for l in o.get("sources", [])]
+       cite = [{"rank": l["rank"], "url": l["url"], "domain": l["domain"]} for l in o.get("citations", [])]
+       from pipeline.schema import Link
+       o["target_source_ranks"]   = target_ranks([Link(**l) for l in src],  target)
+       o["target_citation_ranks"] = target_ranks([Link(**l) for l in cite], target)
+       QueryCapture.model_validate(o)
+   with open(path, "w") as f:
+       json.dump(objects, f)
+   print("valid")
+   EOF
    ```
-   Fix any `ValidationError` (re-capture the field with the browser still open) until it prints
-   `valid`.
+   This overwrites the rank arrays with the deterministic output of `target_ranks` — manual counts
+   are replaced. Fix any `ValidationError` (re-capture the field with the browser still open) until
+   it prints `valid`.
 4. **Close every tab you opened — leave the browser as you found it.** As your **final** browser
    action, once self-validation prints `valid`, close each tab **you** opened for this chunk — the
    capture tab(s) you created with `tabs_create_mcp` **plus** any source tab that opened by accident
