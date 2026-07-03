@@ -122,3 +122,6 @@ examples/test_queries.csv
 /OUTREACH_*.md
 /*_RECON_HANDOFF.md
 /vc_posts/
+
+# Personal orchestration skill — not part of the product.
+/.claude/skills/fable-ruki-agenty/

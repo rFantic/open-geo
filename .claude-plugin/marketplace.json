@@ -12,7 +12,9 @@
       "source": "./",
       "description": "GEO visibility tracker: run queries through an AI engine, measure a target domain's visibility/citation in the answers, and emit a dashboard or PDF report.",
       "version": "0.1.0",
-      "license": "MIT"
+      "license": "MIT",
+      "homepage": "https://opengeo.pro",
+      "keywords": ["geo", "aeo", "generative-engine-optimization", "ai-overview", "visibility", "seo"]
     }
   ]
 }

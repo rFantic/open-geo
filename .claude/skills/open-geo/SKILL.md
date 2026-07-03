@@ -64,9 +64,38 @@ exist / has no data rows.
 
 ---
 
+## STEP R — REPO-ROOT GUARD (always the very first check)
+
+This skill reaches users two ways: a **clone of the open-geo repository** (the primary,
+fully supported path) or the **Claude Code plugin** (a discovery wrapper: its manifest
+registers this skill and the worker agents — nothing else). The pipeline itself
+(`pipeline/*`, `engines/*.md`, `.venv`, `data/aeo.db`) exists only inside a repo clone,
+and every path in this skill is repo-root-relative.
+
+Before STEP A, probe the current working directory with `Read`:
+
+1. **`pipeline/INTERFACES.md` is missing** → you are NOT in a repo clone (typical when the
+   plugin-installed skill is invoked from an unrelated project). Do **not** run the wizard,
+   do **not** call `.venv/bin/python`, do **not** create any file or directory here. Print
+   (in `--lang`): the `/open-geo` command is installed, but the open-geo pipeline runs from
+   a clone of the repository — then the exact steps:
+
+   ```bash
+   git clone https://github.com/Pupok462/open-geo
+   cd open-geo && scripts/setup.sh
+   ```
+
+   and re-run `/open-geo` from that directory (the user can also ask you to run these
+   steps for them outside this skill). Stop.
+2. **Repo present but `.venv/` is missing** → setup has not been run. Tell the user to run
+   `scripts/setup.sh` (creates the venv, installs Python deps and the dashboard frontend),
+   then re-run `/open-geo`. Stop.
+
+---
+
 ## STEP A — RESOLVE PARAMETERS (intro + wizard, with fast-path bypass)
 
-Run this **first**, before STEP 0. Goal: end up with every required parameter resolved.
+Run this after the STEP R guard, before STEP 0. Goal: end up with every required parameter resolved.
 
 **Required:** `questions.csv`, `engine`, `domain`, `--brand`, `--n-worker`.
 **Optional (defaults):** `--output` (`dashboard`), `--period` (`all`), `--lang` (`en`).

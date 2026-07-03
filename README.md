@@ -103,6 +103,17 @@ shell commands. The whole setup is: clone, ask Claude to install it, then use it
 > the core input — it decides *what* gets measured, and the report is only as good as the questions
 > you ask. Format and how to choose them: [What input do I need?](#what-input-do-i-need).
 
+**Or install it as a Claude Code plugin** — registers the `/open-geo` command and its worker
+agents in any session:
+
+```
+/plugin marketplace add Pupok462/open-geo
+/plugin install open-geo@open-geo-marketplace
+```
+
+> The plugin is a discovery wrapper: the pipeline still runs from a repo clone (steps 1–2
+> above), and the command says exactly that if invoked outside one.
+
 **Track it on a schedule.** Wrap the command in Claude Code's **`/loop`** to re-capture on an
 interval and watch the drift — e.g. a weekly read:
 

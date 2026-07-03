@@ -5,7 +5,21 @@
   "author": {
     "name": "open-geo contributors"
   },
+  "homepage": "https://opengeo.pro",
+  "repository": "https://github.com/Pupok462/open-geo",
   "license": "MIT",
-  "keywords": ["geo", "aeo", "generative-engine-optimization", "ai-overview", "visibility", "seo"],
-  "skills": "./.claude/skills/"
+  "keywords": [
+    "geo",
+    "aeo",
+    "generative-engine-optimization",
+    "ai-overview",
+    "visibility",
+    "seo"
+  ],
+  "skills": "./.claude/skills/",
+  "agents": [
+    "./.claude/agents/capture-worker.md",
+    "./.claude/agents/harvest-worker.md",
+    "./.claude/agents/harvest-skeptic.md"
+  ]
 }

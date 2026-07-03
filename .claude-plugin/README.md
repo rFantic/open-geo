@@ -3,7 +3,11 @@
 This directory holds the **optional** one-command-install path for open-geo as a
 Claude Code plugin:
 
-- `plugin.json` — the plugin manifest (skill lives at `.claude/skills/open-geo/`).
+- `plugin.json` — the plugin manifest (skill at `.claude/skills/open-geo/`, worker
+  agents at `.claude/agents/` — both declared via custom paths, since this repo keeps
+  them under `.claude/` instead of the default plugin-root `skills/` + `agents/`;
+  note the schema wants `skills` as a directory string but `agents` as an array of
+  explicit `.md` file paths — a new agent must be appended to that array).
 - `marketplace.json` — a single-plugin marketplace listing this repo (`source: "./"`).
 
 Install (from a Claude Code session):
