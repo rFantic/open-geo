@@ -17,6 +17,16 @@ Install (from a Claude Code session):
 /plugin install open-geo@open-geo-marketplace
 ```
 
+> **Release ritual — bump `version` on every plugin-visible change.** Installed plugins
+> only receive updates when `version` changes in BOTH `plugin.json` and the `plugins[0]`
+> entry of `marketplace.json`; pushing commits without a bump leaves every installed copy
+> stale. Any edit to `SKILL.md`, the agents, or these manifests ⇒ bump both, then users
+> pick it up via `/plugin update open-geo`.
+>
+> **Namespacing.** Plugin skills are namespaced: the plugin-installed command is
+> `/open-geo:open-geo`. The plain `/open-geo` form exists only when working from a repo
+> clone (project-level `.claude/skills/`).
+
 > **Installing the plugin does NOT finish setup.** The plugin only registers the
 > `/open-geo` skill. To actually run a visibility pass you still need to:
 >
