@@ -747,10 +747,6 @@ def test_lens_literal_members_are_exactly_three():
     assert set(typing.get_args(schema_mod.Lens)) == {"general", "branded", "comparative"}
 
 
-# ---------------------------------------------------------------------------
-# normalize_target
-# ---------------------------------------------------------------------------
-
 @pytest.mark.parametrize(
     "raw, expected",
     [
@@ -808,10 +804,6 @@ def test_normalize_target_empty_inputs(raw):
 def test_normalize_target_double_slash_in_path_collapsed():
     assert normalize_target("github.com//user//repo//") == "github.com/user/repo"
 
-
-# ---------------------------------------------------------------------------
-# matches_target
-# ---------------------------------------------------------------------------
 
 def test_matches_target_domain_only_same_domain():
     assert matches_target("https://example.com/page", "example.com")
@@ -871,10 +863,6 @@ def test_matches_target_empty_target_returns_false():
 def test_matches_target_empty_url_returns_false():
     assert not matches_target("", "example.com")
 
-
-# ---------------------------------------------------------------------------
-# target_ranks
-# ---------------------------------------------------------------------------
 
 def _link(rank: int, url: str, domain: str) -> Link:
     return Link(rank=rank, url=url, domain=domain)
