@@ -112,4 +112,94 @@ def normalize_domain(url_or_host: str) -> str:
     return last_two
 
 
-__all__ = ["Lens", "Link", "QueryCapture", "normalize_domain"]
+def normalize_target(url_or_host: str) -> str:
+    raw = str(url_or_host).strip() if url_or_host is not None else ""
+
+    if "://" in raw:
+        raw = raw.split("://", 1)[1]
+    elif raw.startswith("//"):
+        raw = raw[2:]
+
+    for sep in ("?", "#"):
+        idx = raw.find(sep)
+        if idx != -1:
+            raw = raw[:idx]
+
+    slash = raw.find("/")
+    if slash == -1:
+        host_part = raw
+        path_part = ""
+    else:
+        host_part = raw[:slash]
+        path_part = raw[slash + 1:]
+
+    host = normalize_domain(host_part)
+    if not host:
+        return ""
+
+    segments = [s.lower() for s in path_part.split("/") if s]
+    if not segments:
+        return host
+    return host + "/" + "/".join(segments)
+
+
+def matches_target(url_or_host: str, target: str) -> bool:
+    norm_target = normalize_target(target)
+    if not norm_target:
+        return False
+
+    norm_url = normalize_target(url_or_host)
+    if not norm_url:
+        return False
+
+    slash_t = norm_target.find("/")
+    if slash_t == -1:
+        target_domain = norm_target
+        target_segs: list[str] = []
+    else:
+        target_domain = norm_target[:slash_t]
+        target_segs = norm_target[slash_t + 1:].split("/")
+
+    slash_u = norm_url.find("/")
+    if slash_u == -1:
+        url_domain = norm_url
+        url_segs: list[str] = []
+    else:
+        url_domain = norm_url[:slash_u]
+        url_segs = norm_url[slash_u + 1:].split("/")
+
+    if target_domain != url_domain:
+        return False
+
+    if not target_segs:
+        return True
+
+    if len(url_segs) < len(target_segs):
+        return False
+
+    return url_segs[: len(target_segs)] == target_segs
+
+
+def target_ranks(links: list[Link], target: str) -> list[int]:
+    result: list[int] = []
+    for link in links:
+        url_norm = normalize_domain(link.url) if link.url else ""
+        dom_norm = normalize_domain(link.domain) if link.domain else ""
+        if link.url and url_norm == dom_norm:
+            effective = link.url
+        else:
+            effective = link.domain
+        if matches_target(effective, target):
+            result.append(link.rank)
+    return sorted(result)
+
+
+__all__ = [
+    "Lens",
+    "Link",
+    "QueryCapture",
+    "normalize_domain",
+    "normalize_target",
+    "matches_target",
+    "target_ranks",
+]

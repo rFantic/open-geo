@@ -134,7 +134,7 @@ function Dashboard() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `open-geo_${currentBrand?.domain ?? "report"}_${period}.pdf`;
+      a.download = `open-geo_${(currentBrand?.domain ?? "report").replaceAll("/", "-")}_${period}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();

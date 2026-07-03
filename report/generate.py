@@ -22,7 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from pipeline.db import get_conn, get_domain_stats, get_lens_sentiments, init_db
-from pipeline.schema import normalize_domain
+from pipeline.schema import normalize_domain, normalize_target
 from report.i18n import DEFAULT_LANG, Translator, available_codes
 from report.textshape import is_rtl, shape
 
@@ -191,7 +191,7 @@ def _load_metrics_for_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Le
 
 
 def _resolve_brand_id(conn: sqlite3.Connection, name: str, domain: str) -> Optional[int]:
-    norm = normalize_domain(domain)
+    norm = normalize_target(domain)
     row = conn.execute(
         "SELECT id FROM brands WHERE name = ? AND domain = ?", (name, norm)
     ).fetchone()
@@ -293,7 +293,7 @@ def load_report_data(
     brow = conn.execute(
         "SELECT name, domain FROM brands WHERE id = ?", (brand_id,)
     ).fetchone()
-    display_domain = brow["domain"] if brow is not None else normalize_domain(domain)
+    display_domain = brow["domain"] if brow is not None else normalize_target(domain)
 
     history: list[tuple[str, dict[str, LensMetrics]]] = []
     if period == "all":

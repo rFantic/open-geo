@@ -433,7 +433,7 @@ def test_load_metrics_for_run_empty_when_no_rows(empty_db_path):
 def test_resolve_brand_id_exact_match(seeded_db_path):
     conn = get_conn(seeded_db_path)
     try:
-        bid = _resolve_brand_id(conn, "Example", "https://www.example.com/foo")
+        bid = _resolve_brand_id(conn, "Example", "https://www.example.com")
         assert bid == 1
     finally:
         conn.close()
@@ -799,12 +799,12 @@ def test_load_report_data_single_run_has_no_prev(empty_db_path):
 def test_load_report_data_display_domain_from_db_row(empty_db_path):
     conn = get_conn(empty_db_path)
     try:
-        bid = get_or_create_brand(conn, "Example", "https://WWW.Example.com/x")
+        bid = get_or_create_brand(conn, "Example", "https://WWW.Example.com")
         rid = create_run(conn, bid, ENGINE)
         update_run_counts(conn, rid, n_queries=1, n_ok=1, n_failed=0, status="done")
         _insert_metric(conn, run_id=rid, brand_id=bid, lens="all")
         conn.commit()
-        data = load_report_data(conn, "Example", "https://WWW.Example.com/x", ENGINE, "today")
+        data = load_report_data(conn, "Example", "https://WWW.Example.com", ENGINE, "today")
         assert data.brand_domain == "example.com"
     finally:
         conn.close()

@@ -194,7 +194,7 @@ def test_get_or_create_brand_idempotent_same_id(empty_conn):
 
 
 def test_get_or_create_brand_normalizes_domain(empty_conn):
-    bid_url = get_or_create_brand(empty_conn, "Example", "https://www.Example.com/x?utm=1")
+    bid_url = get_or_create_brand(empty_conn, "Example", "https://www.Example.com?utm=1")
     bid_bare = get_or_create_brand(empty_conn, "Example", "example.com")
     assert bid_url == bid_bare
     rows = empty_conn.execute(
@@ -487,7 +487,7 @@ def test_get_or_create_brand_empty_strings_insert_and_are_idempotent(empty_conn)
 
 def test_get_or_create_brand_returns_int_for_existing_row_branch(empty_conn):
     first = get_or_create_brand(empty_conn, "Example", "example.com")
-    second = get_or_create_brand(empty_conn, "Example", "https://WWW.Example.com/path?x=1")
+    second = get_or_create_brand(empty_conn, "Example", "https://WWW.Example.com?x=1")
     assert second == first
     assert isinstance(second, int)
     assert type(second) is int
@@ -948,3 +948,21 @@ def test_init_db_migrates_legacy_results_dedups_and_adds_unique_index(tmp_path):
         ).fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_get_or_create_brand_url_prefix_stored_normalized(empty_conn):
+    bid = get_or_create_brand(empty_conn, "X", "https://GitHub.com/User/Repo/")
+    row = empty_conn.execute(
+        "SELECT domain FROM brands WHERE id = ?", (bid,)
+    ).fetchone()
+    assert row["domain"] == "github.com/user/repo"
+
+
+def test_get_or_create_brand_url_prefix_idempotent_different_writing(empty_conn):
+    bid1 = get_or_create_brand(empty_conn, "X", "https://GitHub.com/User/Repo/")
+    bid2 = get_or_create_brand(empty_conn, "X", "github.com/user/repo")
+    assert bid1 == bid2
+    count = empty_conn.execute(
+        "SELECT COUNT(*) FROM brands WHERE name = 'X'"
+    ).fetchone()[0]
+    assert count == 1

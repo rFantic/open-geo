@@ -938,5 +938,22 @@ def test_build_pdf_ar_is_rtl_and_shapes_via_canvas(tmp_path):
     assert doc_seen.get("rtl") is True
 
 
+def test_resolve_brand_id_finds_prefix_brand_in_any_writing(tmp_path):
+    from pipeline.db import get_conn, get_or_create_brand, create_run, init_db
+    from report.generate import _resolve_brand_id
+
+    db = str(tmp_path / "prefix.db")
+    conn = get_conn(db)
+    try:
+        init_db(conn)
+        bid = get_or_create_brand(conn, "MyProject", "https://GitHub.com/User/Repo/")
+        found = _resolve_brand_id(conn, "MyProject", "github.com/user/repo")
+        assert found == bid
+        found2 = _resolve_brand_id(conn, "MyProject", "https://www.GITHUB.com/User/Repo")
+        assert found2 == bid
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

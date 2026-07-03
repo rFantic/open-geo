@@ -42,8 +42,8 @@ validates every object against it.
 | `overview_present` | bool | yes | Did an AI Overview actually render for this query? This is the **denominator gate** for visibility metrics. |
 | `sources` | array of `Link` | no (default `[]`) | The **relied-on / retrieved set** — every link the model drew on, in display order, **duplicate domains allowed**. This **includes every cited domain**: fold any inline-cited link into `sources` (the visible Google "sources panel" is only a *partial* view of the retrieval set, so a domain cited in the prose but missing from the panel is still a source). |
 | `citations` | array of `Link` | no (default `[]`) | Links **attached / cited** in the answer prose, in order, duplicates allowed. Citations are a **subset of `sources`** (the model can only cite what it retrieved) — every domain here MUST also appear in `sources`. |
-| `target_source_ranks` | array of int | no (default `[]`) | **ALL** 1-based positions of the target domain within `sources`. `[]` if the target never appears in sources. |
-| `target_citation_ranks` | array of int | no (default `[]`) | Same, but for `citations`. |
+| `target_source_ranks` | array of int | no (default `[]`) | **ALL** 1-based positions of links **matching the target** (domain or URL prefix) within `sources`, as produced by `pipeline.schema.target_ranks`. `[]` if the target never appears in sources. |
+| `target_citation_ranks` | array of int | no (default `[]`) | Same, but for `citations`, via `pipeline.schema.target_ranks`. |
 | `brand_in_answer_text` | bool | yes | Was the brand **NAME** mentioned in the prose, independent of any link? |
 | `sentiment` | string \| null | no (default `null`) | Short **qualitative** text describing how the answer treats the target domain (e.g. `"recommended as top pick"`, `"mentioned neutrally among 5 options"`). **`null` if the domain/brand did not appear at all.** This is free text, NOT a number. |
 
@@ -53,7 +53,7 @@ validates every object against it.
 |---|---|---|
 | `rank` | int | 1-based position in its ordered list (`sources` or `citations`). |
 | `url` | string | The full URL. |
-| `domain` | string | Registrable domain, **lowercased, no `www`**. Produce it with `pipeline.schema.normalize_domain(url)`. |
+| `domain` | string | Registrable domain, **lowercased, no `www`**. Produce it with `pipeline.schema.normalize_domain(url)`. `Link.url` SHOULD be the direct publisher URL (unwrap redirect wrappers where possible); when `url` is a redirect wrapper, target matching by URL prefix falls back to domain-only. |
 
 ### 1.2 Rules the capture agent MUST follow
 
@@ -73,6 +73,24 @@ validates every object against it.
   in links). If it appeared anywhere, write one short qualitative phrase.
 - Determine `domain` (and the target domain you match against) via
   `normalize_domain` so matching is consistent across the pipeline.
+- **Target matching — domain or URL prefix.** The `--domain` argument (§3.1) accepts
+  either a bare registrable domain (`example.com`) **or a URL prefix**
+  (`github.com/Pupok462/open-geo`). Canonical form is produced by
+  `pipeline.schema.normalize_target` (strips scheme/`//`, userinfo, port, query,
+  fragment; lowercases path segments; collapses empty segments). A link matches the
+  target when both are canonicalized and: registrable domains are equal **AND** (the
+  target has no path segments, OR the target's path segments are a prefix of the
+  link's path segments). Concretely:
+  - Target without path (`example.com`) → same behavior as before (domain equality).
+  - Target with path (`github.com/user/repo`) → `github.com/user/repo/blob/main/README.md`
+    matches; `github.com/user-fake/repo` does not; `github.com/user` without path does not.
+  - Domain-only `Link` (redirect wrapper or domain-only entry) when target has a path →
+    **conservative non-match** (path unavailable; use `pipeline.schema.target_ranks` which
+    applies this rule via the `effective` selection: direct URL if `normalize_domain(url) ==
+    normalize_domain(domain)`, else domain-only fallback).
+  - Subdomains collapse to registrable domain: `forum.ixbt.com` matches target `ixbt.com`.
+  - Path comparison is **case-insensitive** (GitHub, Reddit, X are case-insensitive — undercounting
+    is worse than rare overcounting).
 - `screenshot_path` is **`null`** in v1: a screenshot may be taken to *read* the
   overview (required — `get_page_text` drops the AI block), but it is **not saved**
   as an artifact.
@@ -128,7 +146,7 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 |---|---|---|
 | `id` | INTEGER PK | |
 | `name` | TEXT | brand name |
-| `domain` | TEXT | normalized registrable domain |
+| `domain` | TEXT | normalized target (registrable domain or URL prefix), produced with `normalize_target` |
 | `created_at` | TEXT | ISO-8601 |
 | — | | `UNIQUE(name, domain)` |
 
@@ -240,7 +258,7 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 | `engine` | TEXT | denormalized |
 | `lens` | TEXT | a specific lens, or `"all"` for the cross-lens scope |
 | `domain` | TEXT | normalized registrable domain (`normalize_domain`); **every** domain seen in `sources`/`citations`, not just the brand |
-| `is_brand` | INTEGER | 0/1 — `1` for the run's own brand domain (so the UI can highlight the brand's row in the leaderboard) |
+| `is_brand` | INTEGER | 0/1 — `1` when this row's `domain` (registrable domain) equals the registrable-domain part of the run's brand target. When the brand target is a URL prefix (`github.com/user/repo`), `is_brand=1` is set on the `github.com` row — broader than the prefix, but correct for the leaderboard which aggregates by registrable domain. The funnel metrics (§4) remain prefix-accurate via `target_ranks`. |
 | `appearances_sources` | INTEGER | # of overview-present queries in scope where the domain appears in `sources` (presence, counted once per query) |
 | `appearances_citations` | INTEGER | same, for `citations` |
 | `sum_min_source_rank` | REAL | Σ over those queries of `min(rank of domain in sources)` — kept so `period=all` rolls up `avg_source_position` by weighted sum |
@@ -301,7 +319,7 @@ mid-run never loses already-captured work:
 > conform to. All CLIs print a **single JSON object to STDOUT** (so callers can
 > parse it); human/log noise goes to STDERR.
 
-### 3.1 `python -m pipeline.ingest --brand "<name>" --domain <domain> --engine <engine> --new-run`
+### 3.1 `python -m pipeline.ingest --brand "<name>" --domain <domain-or-url-prefix> --engine <engine> --new-run`
 
 - Ensures the brand exists (`get_or_create_brand`), creates a new run
   (`create_run`) for that brand+engine.
@@ -405,10 +423,11 @@ Let, within a scope (a specific lens, or `all` = across all lenses of the run):
 - `n_queries`   = number of results in scope.
 - `n_overviews` = results with `overview_present = 1`.
 - `n_in_sources` = results (**among overview-present**) with non-empty
-  `target_source_ranks`.
+  `target_source_ranks`. ("Target" here means the brand's domain **or URL prefix**
+  as accepted by `--domain`; see §1.2 Target matching.)
 - `n_cited`     = results (**among overview-present**) with non-empty
-  `target_citation_ranks`. Counts each query **once** even if the domain is
-  cited multiple times (presence, not occurrences).
+  `target_citation_ranks`. Counts each query **once** even if the target (domain or
+  URL prefix) is cited multiple times (presence, not occurrences).
 
 The model is a **funnel**. Because capture folds every cited link into `sources`
 (citations ⊆ sources — the model can only cite what it retrieved; see §1), the
@@ -528,6 +547,14 @@ domain is listed (brand-competitors *and* publishers/aggregators alike), and the
 one row (`is_brand=1`). Default leaderboard order: `appearances_sources` desc (tie-break
 `appearances_citations` desc, then `domain`); the dashboard additionally lets the user re-sort the
 columns. No domain is dropped silently other than the explicit top-N cap the caller asks for.
+
+> **URL prefix and the leaderboard.** `domain_stats` aggregates by **registrable domain** (not
+> prefix). When the brand target is a URL prefix (`github.com/user/repo`), the leaderboard still
+> shows the `github.com` row as `is_brand=1` — broader than the prefix, but correct for this
+> "answer space" view. The per-run funnel metrics in `metrics` remain prefix-accurate (they use
+> `target_source_ranks` / `target_citation_ranks`, which are produced by `target_ranks` per §1.1).
+> The two views are complementary: funnel = "does your specific page get retrieved/cited?";
+> leaderboard = "what domains share the answer space?"
 
 ---
 

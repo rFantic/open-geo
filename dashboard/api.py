@@ -623,7 +623,7 @@ def report(
             },
         )
 
-    filename = f"open-geo_{brand['domain']}_{engine}_{period}.pdf"
+    filename = f"open-geo_{brand['domain'].replace('/', '-')}_{engine}_{period}.pdf"
     return FileResponse(
         out_path,
         media_type="application/pdf",

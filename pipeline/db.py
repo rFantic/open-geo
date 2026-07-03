@@ -153,9 +153,9 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 
 def get_or_create_brand(conn: sqlite3.Connection, name: str, domain: str) -> int:
-    from pipeline.schema import normalize_domain
+    from pipeline.schema import normalize_target
 
-    norm_domain = normalize_domain(domain)
+    norm_domain = normalize_target(domain)
 
     row = conn.execute(
         "SELECT id FROM brands WHERE name = ? AND domain = ?",

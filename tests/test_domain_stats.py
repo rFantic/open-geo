@@ -233,5 +233,41 @@ def test_compute_domain_scope_normalizes_and_skips_bad_rows():
     assert by["acme.com"]["is_brand"] == 1
 
 
+def test_domain_stats_brand_with_url_prefix_is_brand_set_on_registrable_domain(empty_db_path):
+    conn = get_conn(empty_db_path)
+    try:
+        init_db(conn)
+        bid = get_or_create_brand(conn, "MyProject", "github.com/user/repo")
+        rid = create_run(conn, bid, "google")
+        cap = QueryCapture.model_validate(
+            {
+                "query": "best project tool",
+                "lens": "general",
+                "engine": "google",
+                "captured_at": "2026-07-03T10:00:00Z",
+                "overview_present": True,
+                "sources": [
+                    {"rank": 1, "url": "https://github.com/user/repo", "domain": "github.com"},
+                    {"rank": 2, "url": "https://other.com/x", "domain": "other.com"},
+                ],
+                "citations": [],
+                "target_source_ranks": [1],
+                "target_citation_ranks": [],
+                "brand_in_answer_text": False,
+                "sentiment": None,
+            }
+        )
+        insert_capture(conn, rid, cap)
+        conn.commit()
+        aggregate_run(conn, rid)
+    finally:
+        conn.close()
+
+    by_domain, rows = _stats(empty_db_path, rid, "all")
+    assert "github.com" in by_domain
+    assert by_domain["github.com"]["is_brand"] == 1
+    assert by_domain["other.com"]["is_brand"] == 0
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

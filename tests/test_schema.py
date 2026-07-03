@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 import pipeline.schema as schema_mod
-from pipeline.schema import Link, QueryCapture, normalize_domain
+from pipeline.schema import Link, QueryCapture, normalize_domain, normalize_target, matches_target, target_ranks
 
 
 def _min_capture() -> dict:
@@ -429,7 +429,15 @@ def test_query_capture_json_round_trip():
 
 
 def test_dunder_all_contents():
-    assert schema_mod.__all__ == ["Lens", "Link", "QueryCapture", "normalize_domain"]
+    assert schema_mod.__all__ == [
+        "Lens",
+        "Link",
+        "QueryCapture",
+        "normalize_domain",
+        "normalize_target",
+        "matches_target",
+        "target_ranks",
+    ]
 
 
 def test_models_are_pydantic_base_models():
@@ -737,3 +745,184 @@ def test_lens_literal_members_are_exactly_three():
     import typing
 
     assert set(typing.get_args(schema_mod.Lens)) == {"general", "branded", "comparative"}
+
+
+# ---------------------------------------------------------------------------
+# normalize_target
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("example.com", "example.com"),
+        ("https://example.com", "example.com"),
+        ("http://www.example.com/", "example.com"),
+    ],
+)
+def test_normalize_target_bare_domain_passthrough(raw, expected):
+    assert normalize_target(raw) == expected
+    assert normalize_target(raw) == normalize_domain(raw)
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("https://www.GitHub.com/Pupok462/open-geo/", "github.com/pupok462/open-geo"),
+        ("https://user:pass@example.com:8080/path", "example.com/path"),
+        ("//example.com/a/b", "example.com/a/b"),
+    ],
+)
+def test_normalize_target_scheme_www_port_userinfo(raw, expected):
+    assert normalize_target(raw) == expected
+
+
+def test_normalize_target_trailing_slash_collapsed():
+    assert normalize_target("github.com/user/repo/") == "github.com/user/repo"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("github.com/user?q=1", "github.com/user"),
+        ("github.com/user#frag", "github.com/user"),
+        ("https://github.com/user/repo?tab=readme#top", "github.com/user/repo"),
+    ],
+)
+def test_normalize_target_query_fragment_stripped(raw, expected):
+    assert normalize_target(raw) == expected
+
+
+def test_normalize_target_path_lowercased():
+    assert normalize_target("GitHub.com/Pupok462/Open-Geo") == "github.com/pupok462/open-geo"
+
+
+def test_normalize_target_multisegment():
+    assert normalize_target("https://www.GitHub.com/Pupok462/open-geo/") == "github.com/pupok462/open-geo"
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "https://", "//"])
+def test_normalize_target_empty_inputs(raw):
+    assert normalize_target(raw) == ""
+
+
+def test_normalize_target_double_slash_in_path_collapsed():
+    assert normalize_target("github.com//user//repo//") == "github.com/user/repo"
+
+
+# ---------------------------------------------------------------------------
+# matches_target
+# ---------------------------------------------------------------------------
+
+def test_matches_target_domain_only_same_domain():
+    assert matches_target("https://example.com/page", "example.com")
+
+
+def test_matches_target_domain_only_subdomain_collapses():
+    assert matches_target("https://sub.example.com/x", "example.com")
+
+
+def test_matches_target_domain_only_different_domain():
+    assert not matches_target("https://other.com/x", "example.com")
+
+
+def test_matches_target_prefix_deeper_path_matches():
+    assert matches_target(
+        "https://github.com/Pupok462/open-geo/blob/main/README.md",
+        "github.com/Pupok462/open-geo",
+    )
+
+
+def test_matches_target_prefix_exact_match():
+    assert matches_target("https://github.com/Pupok462/open-geo", "github.com/Pupok462/open-geo")
+
+
+def test_matches_target_prefix_case_insensitive_path():
+    assert matches_target("https://github.com/PUPOK462/OPEN-GEO/blob/x", "github.com/Pupok462/open-geo")
+
+
+def test_matches_target_prefix_user_fake_no_match():
+    assert not matches_target("https://github.com/Pupok462-fake/x", "github.com/Pupok462")
+
+
+def test_matches_target_prefix_different_repo_no_match():
+    assert not matches_target("https://github.com/Pupok462/other-repo", "github.com/Pupok462/open-geo")
+
+
+def test_matches_target_prefix_url_without_path_no_match():
+    assert not matches_target("https://github.com/Pupok462", "github.com/Pupok462/open-geo")
+
+
+def test_matches_target_prefix_different_domain_no_match():
+    assert not matches_target("https://gitlab.com/Pupok462/open-geo", "github.com/Pupok462/open-geo")
+
+
+def test_matches_target_registrable_subdomain_collapses_with_prefix():
+    assert matches_target("https://gist.github.com/user/x", "github.com/user")
+
+
+def test_matches_target_ixbt_subdomain_collapses_to_root():
+    assert matches_target("https://forum.ixbt.com/topic/1", "ixbt.com")
+
+
+def test_matches_target_empty_target_returns_false():
+    assert not matches_target("https://example.com/x", "")
+
+
+def test_matches_target_empty_url_returns_false():
+    assert not matches_target("", "example.com")
+
+
+# ---------------------------------------------------------------------------
+# target_ranks
+# ---------------------------------------------------------------------------
+
+def _link(rank: int, url: str, domain: str) -> Link:
+    return Link(rank=rank, url=url, domain=domain)
+
+
+def test_target_ranks_ascending_order():
+    links = [
+        _link(3, "https://example.com/c", "example.com"),
+        _link(1, "https://example.com/a", "example.com"),
+        _link(2, "https://example.com/b", "example.com"),
+    ]
+    assert target_ranks(links, "example.com") == [1, 2, 3]
+
+
+def test_target_ranks_duplicates_preserved():
+    links = [
+        _link(1, "https://example.com/a", "example.com"),
+        _link(1, "https://example.com/b", "example.com"),
+    ]
+    assert target_ranks(links, "example.com") == [1, 1]
+
+
+def test_target_ranks_redirect_wrapper_domain_only_comparison():
+    links = [
+        _link(1, "https://www.google.com/url?q=https://example.com/x", "example.com"),
+    ]
+    assert target_ranks(links, "example.com") == [1]
+
+
+def test_target_ranks_redirect_wrapper_prefix_target_no_match():
+    links = [
+        _link(1, "https://www.google.com/url?q=https://github.com/user/repo", "github.com"),
+    ]
+    assert target_ranks(links, "github.com/user/repo") == []
+
+
+def test_target_ranks_domain_only_link_prefix_target_excluded():
+    links = [
+        _link(2, "", "github.com"),
+        _link(3, "https://github.com/user/repo/file", "github.com"),
+    ]
+    assert target_ranks(links, "github.com/user/repo") == [3]
+
+
+def test_target_ranks_no_match_returns_empty():
+    links = [_link(1, "https://other.com/x", "other.com")]
+    assert target_ranks(links, "example.com") == []
+
+
+def test_target_ranks_empty_links_returns_empty():
+    assert target_ranks([], "example.com") == []
