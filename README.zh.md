@@ -114,7 +114,7 @@ shell 命令。整个上手流程是：克隆、让 Claude 安装它，然后把
 观察漂移——例如做一次每周的判读：
 
 ```bash
-/loop 1w /open-geo examples/questions.csv google example.com --brand "Example" --output both
+/loop 1w /open-geo examples/questions.csv google example.com --brand "Example" --n-worker 3 --output both
 ```
 
 > 唯一一件 Claude 无法替你做的事：连接 **Claude-in-Chrome** 扩展，并把浏览器
@@ -134,11 +134,11 @@ Python：Claude 编排捕获 → 指标 → 交付物，并把一个仪表盘和
 |---|---|
 | `<questions.csv>` | 含列 **`query,lens`** 的 CSV，其中 `lens ∈ general \| branded \| comparative`。现成样例：`examples/questions.csv`。 |
 | `<engine>` | 要追踪哪个 AI 引擎（如 `google`）。同一个位置可接受任何在 `engines/` 下有捕获 playbook 的引擎。 |
-| `<domain>` | 目标域名（任意写法：`https://www.example.com`、`example.com`——会被自动归一化）。 |
+| `<domain>` | 目标域名**或 URL 前缀**（`github.com`、`github.com/user`、`github.com/user/repo`；任意写法——会被自动归一化）。 |
 | `--brand "<name>"` | 人类可读的品牌名（用于报告/仪表盘标题和摘要）。 |
 | `--n-worker <N>` | **并行**运行的捕获 worker 数量——即本次运行的并发度。 |
 | `--output` | `dashboard`（默认）\| `pdf` \| `both`。 |
-| `--period` | `all`（默认——完整的品牌+引擎历史，启用差值）\| `today`（仅本次运行）。 |
+| `--period` | `all`（默认——完整的品牌+引擎历史，含趋势图）\| `today`（仅本次运行）。 |
 | `--lang` | 交付物的 UI 语言——`en`（默认）\| `ru` \| `zh` \| `ar`。 |
 
 它端到端做了什么：创建一次运行 → 把查询分摊到**并行**的捕获 worker（
@@ -174,8 +174,8 @@ Python：Claude 编排捕获 → 指标 → 交付物，并把一个仪表盘和
 - **Queries** —— 你喂进去的问题（你的 CSV）。
 - **AI Overview** —— 引擎确实生成了 AI 回答的那些查询（它并不总是生成——
   而缺失是有效数据，不是失败）。
-- **In sources** —— 在上述查询中，你的域名进入了回答所依赖的**来源**的那些查询。
-- **Cited** —— 在上述查询中，你的域名确实在回答正文里被**链接/引用**的那些查询。
+- **In sources** —— 在上述查询中，你的目标（域名或 URL 前缀）进入了回答所依赖的**来源**的那些查询。
+- **Cited** —— 在上述查询中，你的目标（域名或 URL 前缀）确实在回答正文里被**链接/引用**的那些查询。
 
 每一步都是前一步的子集，因此这些计数层层嵌套：
 `n_cited ≤ n_in_sources ≤ n_overviews ≤ n_queries`。（引用是来源的子集，因为

@@ -74,7 +74,7 @@ line up without `VITE_API_BASE`.
 | GET  | `/api/competitors?brand_id=&engine=&period=today\|all&lens=&sort=sources\|citations&limit=15` | top-domains leaderboard from `domain_stats` |
 | GET  | `/api/results?run_id=&lens=` | per-query rows (JSON cols decoded, incl. sentiment) |
 | GET  | `/api/i18n` | the `i18n/locales.json` registry — `[{code, name}]`, drives the language switcher |
-| GET  | `/api/i18n/{code}` | that locale's string dict (`i18n/<code>.json`); falls back to `en` for an unknown code |
+| GET  | `/api/i18n/{code}` | that locale's string dict (`i18n/<code>.json`); `404` for an unknown code — the frontend then falls back to bundled English |
 | POST | `/api/report?brand_id=&engine=&period=today\|all&lang=en\|ru\|zh\|ar` | runs `report.generate` (with `--lang`), streams the PDF |
 
 `period` semantics for `/api/metrics`:
@@ -122,8 +122,9 @@ the button degrades gracefully.
 `/api/i18n` and `/api/i18n/{code}` serve the static locale files from the repo's `i18n/`
 dir (resolved relative to the repo root, same as `OPEN_GEO_DB`). `/api/i18n` returns the
 `locales.json` registry that drives the switcher; `/api/i18n/{code}` returns one locale's
-string dict, falling back to `en` for an unknown code (the frontend also falls back per
-key). Adding a language is dropping a JSON file — see `i18n/README.md`.
+string dict and answers `404` for an unknown code — the frontend catches that and falls
+back to its bundled English dict (and falls back to English per missing key). Adding a
+language is dropping a JSON file — see `i18n/README.md`.
 
 ## Frontend
 

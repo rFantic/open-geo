@@ -54,7 +54,7 @@ ambiguous — the shapes there win over this prose.
 | `--brand "<name>"` | yes | — | Human brand name (free text, may contain spaces — keep it quoted). Stored on the run; used in report/dashboard titles and the summary. |
 | `--n-worker <N>` | yes | — | Number of capture sub-agents to run **in parallel** — the run's concurrency. Step 2 splits the queries into N chunks, one per worker. |
 | `--output dashboard\|pdf\|both` | no | `dashboard` | Which deliverable(s) to produce in step 6. |
-| `--period today\|all` | no | `all` | Reporting window passed to the dashboard/report: `today` = just this run's date, `all` = full history for this brand+engine (enables the previous-run deltas described in INTERFACES §4.1). |
+| `--period today\|all` | no | `all` | Reporting window passed to the dashboard/report: `today` = just this run's date, `all` = full history for this brand+engine (adds the PDF trend chart / the dashboard's whole-period view). Previous-run deltas (INTERFACES §4.1) render whenever an earlier completed run exists — in the PDF for either period, and in the dashboard's latest-run view. |
 | `--lang en\|ru\|zh\|ar` | no | `en` | UI language for the deliverables: it is passed to the report (`report.generate --lang`) and is the dashboard's **default** language (the switcher can still change it in the browser). Extensible to any code registered in `i18n/locales.json`. It also sets the language of the **final summary** you print in step 7. |
 
 If a required argument is missing, go to **STEP A** (the parameter wizard) to collect it
@@ -374,8 +374,8 @@ chunk** — incrementally, so a crash mid-run never loses already-captured work 
    `COUNT(results)`); `n_failed` = `n_queries − n_ok`. Set `status='done'` on success, or
    `'failed'` if the run collapsed (playbook missing, engine unreachable for everything).
    **Finalizing `status` is the orchestrator's job — `ingest` never sets it** (INTERFACES
-   §2.1/§3.2); a completed run with `status='done'` unlocks previous-run **deltas** for
-   `--period all` (INTERFACES §4.1). **Never leave a run stuck in `status='running'`.**
+   §2.1/§3.2); only runs with `status='done'` feed previous-run **deltas** and the
+   `--period all` rollup (INTERFACES §4.1). **Never leave a run stuck in `status='running'`.**
 
 ---
 
@@ -546,7 +546,7 @@ English). Cover:
 
 Format as percentages where natural, and **note guard cases** (`null` → "no data" / "—", not
 `0`). End by pointing to the produced deliverable(s): the dashboard URL and/or the PDF path.
-If `--period all` and a previous completed run exists, you may mention the direction of change
+If a previous completed run exists, you may mention the direction of change
 (deltas are computed at read-time per INTERFACES §4.1) — otherwise omit.
 
 Example shape (English; fill with real numbers; one `lens="all"` row drives it):

@@ -120,7 +120,7 @@ any session:
 interval and watch the drift — e.g. a weekly read:
 
 ```bash
-/loop 1w /open-geo examples/questions.csv google example.com --brand "Example" --output both
+/loop 1w /open-geo examples/questions.csv google example.com --brand "Example" --n-worker 3 --output both
 ```
 
 > The one thing Claude can't do for you: connect the **Claude-in-Chrome** extension and log the
@@ -144,7 +144,7 @@ Python: Claude orchestrates capture → metrics → deliverables and hands you a
 | `--brand "<name>"` | human brand name (used in report/dashboard titles and the summary). |
 | `--n-worker <N>` | number of capture workers run **in parallel** — the run's concurrency. |
 | `--output` | `dashboard` (default) \| `pdf` \| `both`. |
-| `--period` | `all` (default — full brand+engine history, enables deltas) \| `today` (this run only). |
+| `--period` | `all` (default — full brand+engine history, with the trend chart) \| `today` (this run only). |
 | `--lang` | UI language of the deliverables — `en` (default) \| `ru` \| `zh` \| `ar`. |
 
 What it does, end to end: creates a run → splits the queries across **parallel** capture workers

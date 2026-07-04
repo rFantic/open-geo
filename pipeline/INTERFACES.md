@@ -287,7 +287,7 @@ A batch fed to ingest is simply: `[ {QueryCapture}, {QueryCapture}, ... ]`.
 - `create_run(conn, brand_id, engine) -> int` (status `'running'`)
 - `update_run_counts(conn, run_id, n_queries=?, n_ok=?, n_failed=?, status=?) -> None`
 - `upsert_lens_sentiment(conn, run_id, lens, summary) -> None` (replaces the row for that `run_id`+`lens`; `summary=None` clears it)
-- `get_lens_sentiments(conn, run_id) -> dict[str, str]` (lens → summary; returns `{}` if the `lens_sentiment` table is absent)
+- `get_lens_sentiments(conn, run_id) -> dict[str, str]` (lens → summary; rows with a `NULL` `summary` are omitted — a missing key already means "no synthesis"; returns `{}` if the `lens_sentiment` table is absent)
 - `get_domain_stats(conn, run_id, lens="all") -> list[dict]` (the leaderboard rows for one run+lens, ordered by `appearances_sources` desc; returns `[]` if the `domain_stats` table is absent)
 - `get_captured_keys(conn, run_id) -> set[tuple[str, str]]` (the `(query, lens)` pairs already in `results` for the run — the resume diff source)
 - `find_unfinished_run(conn, brand_id, engine) -> int | None` (most recent `status='running'` run for that brand+engine — the crashed run to resume, or `None`)
@@ -313,11 +313,13 @@ mid-run never loses already-captured work:
 
 ---
 
-## 3. CLI contracts — `pipeline.ingest` and `pipeline.aggregate`
+## 3. CLI contracts — `pipeline.ingest`, `pipeline.aggregate`, `pipeline.lens_sentiment`
 
-> **Both CLIs are implemented.** This section is the authoritative contract they
+> **All three CLIs are implemented.** This section is the authoritative contract they
 > conform to. All CLIs print a **single JSON object to STDOUT** (so callers can
-> parse it); human/log noise goes to STDERR.
+> parse it); human/log noise goes to STDERR. Each also accepts an optional
+> `--db <path>` (default `data/aeo.db`, §2) selecting the SQLite file — used by
+> tests/fixtures; it changes no contract shape.
 
 ### 3.1 `python -m pipeline.ingest --brand "<name>" --domain <domain-or-url-prefix> --engine <engine> --new-run`
 
@@ -403,7 +405,9 @@ mid-run never loses already-captured work:
 - Reads a JSON **object** mapping `lens` → `summary` from STDIN, e.g.
   `{"all": "...", "general": "...", "branded": "...", "comparative": "..."}`. Keys are a
   subset of `{general, branded, comparative, all}`; `summary` is a string, or `null` to clear.
-  Only provided lenses are written.
+  Only provided lenses are written. A key **outside** that set is **silently skipped** — it is
+  not written and does not appear in `written` (no error; the caller sees the omission by
+  diffing `written` against what it sent).
 - **Upserts** into `lens_sentiment` (§2) — one row per `run_id`+`lens` (`UNIQUE(run_id, lens)`),
   stamping `computed_at`. This is how the **orchestrator** persists the per-lens **qualitative
   synthesis** it writes at finalize (SKILL STEP 5b); the deterministic `pipeline.aggregate`
