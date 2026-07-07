@@ -81,7 +81,6 @@ def _mk(seed: int, **kw) -> QueryCapture:
         in_sources=False,
         cited=False,
         multi_rank=False,
-        n_idx=1,
     )
     base.update(kw)
     rng = Random(seed)
@@ -180,7 +179,7 @@ def test_make_capture_sentiment_neutral_when_rank_above_one():
 
 
 def test_make_capture_screenshot_path_always_null():
-    cap = _mk(0, lens="comparative", overview_present=False, n_idx=7)
+    cap = _mk(0, lens="comparative", overview_present=False)
     assert cap.screenshot_path is None
 
 
@@ -577,7 +576,7 @@ def test_make_capture_in_sources_ranks_within_bounds_many_seeds():
         cap = sd._make_capture(
             Random(seed), "q", "branded", at,
             overview_present=True, in_sources=True, cited=False,
-            multi_rank=True, n_idx=1,
+            multi_rank=True,
         )
         placed = sorted(ln.rank for ln in cap.sources if ln.domain == TARGET)
         assert placed == cap.target_source_ranks
@@ -701,7 +700,7 @@ def test_seed_all_row_aggregates_match_lens_sums(tmp_path):
     by_lens = {r["lens"]: r for r in rows}
     lenses = ["general", "branded", "comparative"]
     for field in ("n_queries", "n_overviews", "n_in_sources", "n_cited"):
-        assert by_lens["all"][field] == sum(by_lens[l][field] for l in lenses)
+        assert by_lens["all"][field] == sum(by_lens[lns][field] for lns in lenses)
     assert by_lens["all"]["n_queries"] == 24
 
 

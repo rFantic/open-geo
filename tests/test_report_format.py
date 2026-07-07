@@ -8,10 +8,8 @@ from pipeline.db import (
     create_run,
     get_conn,
     get_or_create_brand,
-    init_db,
     update_run_counts,
 )
-from report import generate as g
 from report.generate import (
     BAD,
     GOOD,

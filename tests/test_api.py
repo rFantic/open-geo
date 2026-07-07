@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -10,7 +9,6 @@ from pipeline.db import (
     create_run,
     get_conn,
     get_or_create_brand,
-    init_db,
     update_run_counts,
 )
 

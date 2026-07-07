@@ -126,7 +126,6 @@ def _make_capture(
     in_sources: bool,
     cited: bool,
     multi_rank: bool,
-    n_idx: int,
 ) -> QueryCapture:
     if not overview_present:
         return QueryCapture(
@@ -254,7 +253,6 @@ def _build_run_captures(
                     in_sources=in_sources,
                     cited=cited,
                     multi_rank=multi_rank,
-                    n_idx=n_idx,
                 )
             )
 

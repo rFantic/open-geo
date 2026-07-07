@@ -702,9 +702,11 @@ def test_render_footer_localizes_report_name_only():
     ten, tru = _en(), Translator("ru")
     assert ten.t("report.footer_report_name") != tru.t("report.footer_report_name")
     assert ten.t("common.app_title") == tru.t("common.app_title")
-    doc_en = _doc(); doc_en.fill_background()
+    doc_en = _doc()
+    doc_en.fill_background()
     render_footer(doc_en, ten, _report_data())
-    doc_ru = _doc(); doc_ru.fill_background()
+    doc_ru = _doc()
+    doc_ru.fill_background()
     render_footer(doc_ru, tru, _report_data())
 
 
@@ -939,7 +941,7 @@ def test_build_pdf_ar_is_rtl_and_shapes_via_canvas(tmp_path):
 
 
 def test_resolve_brand_id_finds_prefix_brand_in_any_writing(tmp_path):
-    from pipeline.db import get_conn, get_or_create_brand, create_run, init_db
+    from pipeline.db import get_conn, get_or_create_brand, init_db
     from report.generate import _resolve_brand_id
 
     db = str(tmp_path / "prefix.db")
