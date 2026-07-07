@@ -1,7 +1,7 @@
 ---
 name: capture-worker
 description: Drives one engine capture playbook over a chunk of (query, lens) rows and returns validated QueryCapture JSON. Never writes the DB, never starts servers. Spawned by the open-geo orchestrator (STEP 3).
-tools: Read, Write, Bash, mcp__Claude_in_Chrome__tabs_context_mcp, mcp__Claude_in_Chrome__tabs_create_mcp, mcp__Claude_in_Chrome__tabs_close_mcp, mcp__Claude_in_Chrome__navigate, mcp__Claude_in_Chrome__read_page, mcp__Claude_in_Chrome__find, mcp__Claude_in_Chrome__get_page_text, mcp__Claude_in_Chrome__computer
+tools: Read, Write, Bash, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__find, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__browser_batch
 ---
 
 # capture-worker — engine capture sub-agent
