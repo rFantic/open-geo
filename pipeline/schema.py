@@ -143,6 +143,13 @@ def normalize_target(url_or_host: str) -> str:
     return host + "/" + "/".join(segments)
 
 
+def _split_domain_segs(norm: str) -> tuple[str, list[str]]:
+    slash = norm.find("/")
+    if slash == -1:
+        return norm, []
+    return norm[:slash], norm[slash + 1:].split("/")
+
+
 def matches_target(url_or_host: str, target: str) -> bool:
     norm_target = normalize_target(target)
     if not norm_target:
@@ -152,21 +159,8 @@ def matches_target(url_or_host: str, target: str) -> bool:
     if not norm_url:
         return False
 
-    slash_t = norm_target.find("/")
-    if slash_t == -1:
-        target_domain = norm_target
-        target_segs: list[str] = []
-    else:
-        target_domain = norm_target[:slash_t]
-        target_segs = norm_target[slash_t + 1:].split("/")
-
-    slash_u = norm_url.find("/")
-    if slash_u == -1:
-        url_domain = norm_url
-        url_segs: list[str] = []
-    else:
-        url_domain = norm_url[:slash_u]
-        url_segs = norm_url[slash_u + 1:].split("/")
+    target_domain, target_segs = _split_domain_segs(norm_target)
+    url_domain, url_segs = _split_domain_segs(norm_url)
 
     if target_domain != url_domain:
         return False

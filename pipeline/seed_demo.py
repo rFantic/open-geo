@@ -13,6 +13,7 @@ from pipeline.db import (
     create_run,
     get_conn,
     get_or_create_brand,
+    init_db,
     update_run_counts,
     upsert_lens_sentiment,
 )
@@ -276,8 +277,6 @@ def seed(db_path: str = DB_PATH, *, reset: bool = False, seed_value: int = 20260
 
     conn = get_conn(db_path)
     try:
-        from pipeline.db import init_db
-
         init_db(conn)
         brand_id = get_or_create_brand(conn, BRAND_NAME, BRAND_DOMAIN)
 

@@ -17,8 +17,8 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _row_in_sources(result: sqlite3.Row) -> list[int]:
-    raw = result["target_source_ranks_json"]
+def _row_int_ranks(result: sqlite3.Row, col: str) -> list[int]:
+    raw = result[col]
     if not raw:
         return []
     try:
@@ -26,17 +26,14 @@ def _row_in_sources(result: sqlite3.Row) -> list[int]:
     except (json.JSONDecodeError, TypeError):
         return []
     return [int(r) for r in ranks] if isinstance(ranks, list) else []
+
+
+def _row_in_sources(result: sqlite3.Row) -> list[int]:
+    return _row_int_ranks(result, "target_source_ranks_json")
 
 
 def _row_citation_ranks(result: sqlite3.Row) -> list[int]:
-    raw = result["target_citation_ranks_json"]
-    if not raw:
-        return []
-    try:
-        ranks = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return []
-    return [int(r) for r in ranks] if isinstance(ranks, list) else []
+    return _row_int_ranks(result, "target_citation_ranks_json")
 
 
 def _compute_scope(results: list[sqlite3.Row]) -> dict[str, Any]:

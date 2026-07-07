@@ -23,6 +23,47 @@ type Row = {
 
 const POSITION_KEYS = new Set(["avg_source_position", "avg_citation_position"]);
 
+const LINES: {
+  dataKey: string;
+  yAxisId: "pct" | "pos";
+  nameKey: string;
+  stroke: string;
+  dashed?: boolean;
+}[] = [
+  {
+    dataKey: "overview_coverage",
+    yAxisId: "pct",
+    nameKey: "dashboard.chart_series_coverage",
+    stroke: "var(--c-coverage)",
+  },
+  {
+    dataKey: "visibility_in_sources",
+    yAxisId: "pct",
+    nameKey: "dashboard.chart_series_visibility_sources",
+    stroke: "var(--c-vis-src)",
+  },
+  {
+    dataKey: "visibility_in_citations",
+    yAxisId: "pct",
+    nameKey: "dashboard.chart_series_visibility_citations",
+    stroke: "var(--c-vis-cit)",
+  },
+  {
+    dataKey: "avg_source_position",
+    yAxisId: "pos",
+    nameKey: "dashboard.chart_series_position_sources",
+    stroke: "var(--c-pos-src)",
+    dashed: true,
+  },
+  {
+    dataKey: "avg_citation_position",
+    yAxisId: "pos",
+    nameKey: "dashboard.chart_series_position_citations",
+    stroke: "var(--c-pos-cit)",
+    dashed: true,
+  },
+];
+
 const toPct = (v: number | null | undefined): number | null =>
   v === null || v === undefined ? null : +(v * 100).toFixed(1);
 
@@ -94,58 +135,20 @@ export function MetricsChart({ points }: { points: TimeseriesPoint[] }) {
           }}
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Line
-          yAxisId="pct"
-          type="monotone"
-          dataKey="overview_coverage"
-          name={t("dashboard.chart_series_coverage")}
-          stroke="var(--c-coverage)"
-          strokeWidth={2}
-          dot={{ r: 3 }}
-          connectNulls
-        />
-        <Line
-          yAxisId="pct"
-          type="monotone"
-          dataKey="visibility_in_sources"
-          name={t("dashboard.chart_series_visibility_sources")}
-          stroke="var(--c-vis-src)"
-          strokeWidth={2}
-          dot={{ r: 3 }}
-          connectNulls
-        />
-        <Line
-          yAxisId="pct"
-          type="monotone"
-          dataKey="visibility_in_citations"
-          name={t("dashboard.chart_series_visibility_citations")}
-          stroke="var(--c-vis-cit)"
-          strokeWidth={2}
-          dot={{ r: 3 }}
-          connectNulls
-        />
-        <Line
-          yAxisId="pos"
-          type="monotone"
-          dataKey="avg_source_position"
-          name={t("dashboard.chart_series_position_sources")}
-          stroke="var(--c-pos-src)"
-          strokeWidth={2}
-          strokeDasharray="5 3"
-          dot={{ r: 3 }}
-          connectNulls
-        />
-        <Line
-          yAxisId="pos"
-          type="monotone"
-          dataKey="avg_citation_position"
-          name={t("dashboard.chart_series_position_citations")}
-          stroke="var(--c-pos-cit)"
-          strokeWidth={2}
-          strokeDasharray="5 3"
-          dot={{ r: 3 }}
-          connectNulls
-        />
+        {LINES.map((l) => (
+          <Line
+            key={l.dataKey}
+            yAxisId={l.yAxisId}
+            type="monotone"
+            dataKey={l.dataKey}
+            name={t(l.nameKey)}
+            stroke={l.stroke}
+            strokeWidth={2}
+            strokeDasharray={l.dashed ? "5 3" : undefined}
+            dot={{ r: 3 }}
+            connectNulls
+          />
+        ))}
       </LineChart>
     </ResponsiveContainer>
   );

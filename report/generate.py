@@ -22,7 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from pipeline.db import get_conn, get_domain_stats, get_lens_sentiments, init_db
-from pipeline.schema import normalize_domain, normalize_target
+from pipeline.schema import normalize_target
 from report.i18n import DEFAULT_LANG, Translator, available_codes
 from report.textshape import is_rtl, shape
 
@@ -333,24 +333,21 @@ def _num(x: Optional[float], digits: int = 1, lang: str = DEFAULT_LANG) -> str:
     return "—" if x is None else _dec(f"{x:.{digits}f}", lang)
 
 
-def _fmt_dt(iso: Optional[str]) -> str:
+def _fmt_iso(iso: Optional[str], fmt: str) -> str:
     if not iso:
         return "—"
     try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        return dt.strftime("%d.%m.%Y %H:%M")
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).strftime(fmt)
     except (ValueError, TypeError):
         return iso
+
+
+def _fmt_dt(iso: Optional[str]) -> str:
+    return _fmt_iso(iso, "%d.%m.%Y %H:%M")
 
 
 def _fmt_date(iso: Optional[str]) -> str:
-    if not iso:
-        return "—"
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        return dt.strftime("%d.%m.%Y")
-    except (ValueError, TypeError):
-        return iso
+    return _fmt_iso(iso, "%d.%m.%Y")
 
 
 @dataclass
@@ -361,25 +358,39 @@ class Delta:
     arrow: str
 
 
-def _delta_pct(
-    t: Translator,
-    cur: Optional[float],
-    prev: Optional[float],
-    higher_is_better: bool = True,
-) -> Delta:
+def _delta_none_case(
+    t: Translator, cur: Optional[float], prev: Optional[float]
+) -> Optional[Delta]:
     if cur is None and prev is None:
         return Delta(t.t("common.dash"), INK_FAINT, "")
     if prev is None:
         return Delta(t.t("report.delta_new"), INK_DIM, "")
     if cur is None:
         return Delta(t.t("report.delta_no_data"), INK_DIM, "")
-    diff = (cur - prev) * 100.0
-    if abs(diff) < 0.5:
-        return Delta(t.t("report.delta_zero_pp"), INK_DIM, "▬")
+    return None
+
+
+def _delta_dir(diff: float, higher_is_better: bool) -> tuple[str, str, str]:
     improved = diff > 0 if higher_is_better else diff < 0
     color = GOOD if improved else BAD
     arrow = "▲" if diff > 0 else "▼"
     sign = "+" if diff > 0 else "−"
+    return color, arrow, sign
+
+
+def _delta_pct(
+    t: Translator,
+    cur: Optional[float],
+    prev: Optional[float],
+    higher_is_better: bool = True,
+) -> Delta:
+    nd = _delta_none_case(t, cur, prev)
+    if nd is not None:
+        return nd
+    diff = (cur - prev) * 100.0
+    if abs(diff) < 0.5:
+        return Delta(t.t("report.delta_zero_pp"), INK_DIM, "▬")
+    color, arrow, sign = _delta_dir(diff, higher_is_better)
     return Delta(f"{sign}{abs(diff):.0f} {t.t('report.delta_pp_suffix')}", color, arrow)
 
 
@@ -390,19 +401,13 @@ def _delta_num(
     higher_is_better: bool = True,
     digits: int = 1,
 ) -> Delta:
-    if cur is None and prev is None:
-        return Delta(t.t("common.dash"), INK_FAINT, "")
-    if prev is None:
-        return Delta(t.t("report.delta_new"), INK_DIM, "")
-    if cur is None:
-        return Delta(t.t("report.delta_no_data"), INK_DIM, "")
+    nd = _delta_none_case(t, cur, prev)
+    if nd is not None:
+        return nd
     diff = cur - prev
     if abs(diff) < 10 ** (-digits) / 2:
         return Delta(t.t("report.delta_zero"), INK_DIM, "▬")
-    improved = diff > 0 if higher_is_better else diff < 0
-    color = GOOD if improved else BAD
-    arrow = "▲" if diff > 0 else "▼"
-    sign = "+" if diff > 0 else "−"
+    color, arrow, sign = _delta_dir(diff, higher_is_better)
     return Delta(f"{sign}{_dec(f'{abs(diff):.{digits}f}', t.lang)}", color, arrow)
 
 
@@ -785,32 +790,15 @@ def render_cover(doc: Doc, t: Translator, data: ReportData, generated_at: dateti
     )
 
 
-def render_kpi_cards(doc: Doc, t: Translator, data: ReportData) -> None:
-    _section_header(doc, "01", t.t("report.section_kpi"))
-
-    cur = data.metrics.get("all")
-    prev = data.prev_metrics.get("all")
-
-    if data.prev_run_at:
-        sub = t.t(
-            "report.kpi_compare",
-            current=_fmt_dt(data.run_at),
-            previous=_fmt_dt(data.prev_run_at),
-        )
-    else:
-        sub = t.t("report.kpi_no_prev", current=_fmt_dt(data.run_at))
-    doc.text(sub, 9, INK_DIM, FONT)
-    doc.move(16)
-
+def _build_kpi_cards(t: Translator, cur, prev, lang: str) -> list[dict]:
     def g(attr: str) -> Optional[float]:
         return getattr(cur, attr) if cur is not None else None
 
     def gp(attr: str) -> Optional[float]:
         return getattr(prev, attr) if prev is not None else None
 
-    lang = t.lang
     lower_better = t.t("common.lower_is_better")
-    cards = [
+    return [
         {
             "label": t.t("metrics.overview_coverage.label"),
             "value": _pct(g("overview_coverage"), lang),
@@ -867,6 +855,27 @@ def render_kpi_cards(doc: Doc, t: Translator, data: ReportData) -> None:
         },
     ]
 
+
+def render_kpi_cards(doc: Doc, t: Translator, data: ReportData) -> None:
+    _section_header(doc, "01", t.t("report.section_kpi"))
+
+    cur = data.metrics.get("all")
+    prev = data.prev_metrics.get("all")
+
+    if data.prev_run_at:
+        sub = t.t(
+            "report.kpi_compare",
+            current=_fmt_dt(data.run_at),
+            previous=_fmt_dt(data.prev_run_at),
+        )
+    else:
+        sub = t.t("report.kpi_no_prev", current=_fmt_dt(data.run_at))
+    doc.text(sub, 9, INK_DIM, FONT)
+    doc.move(16)
+
+    lang = t.lang
+    cards = _build_kpi_cards(t, cur, prev, lang)
+
     gap = 6 * mm
     avail = PAGE_W - 2 * MARGIN
     card_w = (avail - gap) / 2
@@ -908,6 +917,47 @@ def render_kpi_cards(doc: Doc, t: Translator, data: ReportData) -> None:
     doc.move(n_rows * card_h + (n_rows - 1) * gap + 6)
 
 
+def _place_full_width_chart(doc: Doc, png: bytes, move_after: float) -> None:
+    chart_w = PAGE_W - 2 * MARGIN
+    reader = ImageReader(io.BytesIO(png))
+    iw, ih = reader.getSize()
+    h = chart_w / iw * ih
+    doc.ensure(h + 6)
+    used = doc.image_png(png, chart_w)
+    doc.move(used + move_after)
+
+
+def _table_header(
+    doc: Doc,
+    top: float,
+    header_h: float,
+    avail: float,
+    first_label: str,
+    first_col_w: float,
+    metric_cols: list[str],
+    metric_w: float,
+) -> None:
+    doc.rounded_panel(MARGIN, top, avail, header_h, fill=PANEL_ALT, stroke=None, radius=4)
+    doc.c.setFillColor(INK_DIM)
+    doc.c.setFont(FONT_BOLD, 9)
+    doc.c.drawString(MARGIN + 6, top - header_h + 3 * mm, first_label)
+    for i, mc in enumerate(metric_cols):
+        cx_right = MARGIN + first_col_w + metric_w * (i + 1) - 6
+        doc.c.drawRightString(cx_right, top - header_h + 3 * mm, mc)
+
+
+def _table_border_and_caption(
+    doc: Doc, top: float, avail: float, table_h: float, caption: str
+) -> None:
+    doc.c.setStrokeColor(STROKE)
+    doc.c.setLineWidth(0.8)
+    doc.c.roundRect(MARGIN, top - table_h, avail, table_h, 4, stroke=1, fill=0)
+    doc.y = top - table_h
+    doc.move(6)
+    doc.text(caption, 8, INK_FAINT, FONT_OBLIQUE)
+    doc.move(10)
+
+
 def render_lenses(doc: Doc, t: Translator, data: ReportData) -> None:
     _section_header(doc, "02", t.t("report.section_lenses"))
 
@@ -932,13 +982,9 @@ def render_lenses(doc: Doc, t: Translator, data: ReportData) -> None:
     doc.ensure(table_h + 6)
 
     top = doc.y
-    doc.rounded_panel(MARGIN, top, avail, header_h, fill=PANEL_ALT, stroke=None, radius=4)
-    doc.c.setFillColor(INK_DIM)
-    doc.c.setFont(FONT_BOLD, 9)
-    doc.c.drawString(MARGIN + 6, top - header_h + 3 * mm, t.t("report.lenses_table_col_type"))
-    for i, mc in enumerate(metric_cols):
-        cx_right = MARGIN + col_label_w + metric_w * (i + 1) - 6
-        doc.c.drawRightString(cx_right, top - header_h + 3 * mm, mc)
+    _table_header(
+        doc, top, header_h, avail, t.t("report.lenses_table_col_type"), col_label_w, metric_cols, metric_w
+    )
 
     body_order = lenses + (["all"] if "all" in data.metrics else [])
     row_top = top - header_h
@@ -975,24 +1021,11 @@ def render_lenses(doc: Doc, t: Translator, data: ReportData) -> None:
 
         row_top -= row_h
 
-    doc.c.setStrokeColor(STROKE)
-    doc.c.setLineWidth(0.8)
-    doc.c.roundRect(MARGIN, top - table_h, avail, table_h, 4, stroke=1, fill=0)
-
-    doc.y = top - table_h
-    doc.move(6)
-    doc.text(t.t("report.lenses_caption"), 8, INK_FAINT, FONT_OBLIQUE)
-    doc.move(10)
+    _table_border_and_caption(doc, top, avail, table_h, t.t("report.lenses_caption"))
 
     if lenses:
         png = chart_lenses_grouped_bar(t, data.metrics)
-        chart_w = PAGE_W - 2 * MARGIN
-        reader = ImageReader(io.BytesIO(png))
-        iw, ih = reader.getSize()
-        h = chart_w / iw * ih
-        doc.ensure(h + 6)
-        used = doc.image_png(png, chart_w)
-        doc.move(used + 6)
+        _place_full_width_chart(doc, png, 6)
 
 
 def render_funnel(doc: Doc, t: Translator, data: ReportData) -> None:
@@ -1013,13 +1046,7 @@ def render_funnel(doc: Doc, t: Translator, data: ReportData) -> None:
     doc.move(10)
 
     png = chart_funnel(t, m)
-    chart_w = PAGE_W - 2 * MARGIN
-    reader = ImageReader(io.BytesIO(png))
-    iw, ih = reader.getSize()
-    h = chart_w / iw * ih
-    doc.ensure(h + 6)
-    used = doc.image_png(png, chart_w)
-    doc.move(used + 8)
+    _place_full_width_chart(doc, png, 8)
 
 
 def render_history(doc: Doc, t: Translator, data: ReportData) -> None:
@@ -1034,13 +1061,7 @@ def render_history(doc: Doc, t: Translator, data: ReportData) -> None:
         FONT,
     )
     doc.move(10)
-    chart_w = PAGE_W - 2 * MARGIN
-    reader = ImageReader(io.BytesIO(png))
-    iw, ih = reader.getSize()
-    h = chart_w / iw * ih
-    doc.ensure(h + 6)
-    used = doc.image_png(png, chart_w)
-    doc.move(used + 8)
+    _place_full_width_chart(doc, png, 8)
 
 
 def _wrap_text(c: canvas.Canvas, text: str, font: str, size: float, max_w: float) -> list[str]:
@@ -1186,13 +1207,9 @@ def render_competitors(doc: Doc, t: Translator, data: ReportData) -> None:
     doc.ensure(table_h + 6)
 
     top = doc.y
-    doc.rounded_panel(MARGIN, top, avail, header_h, fill=PANEL_ALT, stroke=None, radius=4)
-    doc.c.setFillColor(INK_DIM)
-    doc.c.setFont(FONT_BOLD, 9)
-    doc.c.drawString(MARGIN + 6, top - header_h + 3 * mm, t.t("report.competitors_col_domain"))
-    for i, mc in enumerate(metric_cols):
-        cx_right = MARGIN + col_domain_w + metric_w * (i + 1) - 6
-        doc.c.drawRightString(cx_right, top - header_h + 3 * mm, mc)
+    _table_header(
+        doc, top, header_h, avail, t.t("report.competitors_col_domain"), col_domain_w, metric_cols, metric_w
+    )
 
     you = t.t("report.competitors_you")
     row_top = top - header_h
@@ -1228,14 +1245,7 @@ def render_competitors(doc: Doc, t: Translator, data: ReportData) -> None:
 
         row_top -= row_h
 
-    doc.c.setStrokeColor(STROKE)
-    doc.c.setLineWidth(0.8)
-    doc.c.roundRect(MARGIN, top - table_h, avail, table_h, 4, stroke=1, fill=0)
-
-    doc.y = top - table_h
-    doc.move(6)
-    doc.text(t.t("report.competitors_caption"), 8, INK_FAINT, FONT_OBLIQUE)
-    doc.move(10)
+    _table_border_and_caption(doc, top, avail, table_h, t.t("report.competitors_caption"))
 
 
 def render_footer(doc: Doc, t: Translator, data: ReportData, page_label_only: bool = False) -> None:

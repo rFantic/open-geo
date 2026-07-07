@@ -334,6 +334,17 @@ def timeseries(
         conn.close()
 
 
+def _fetch_optional(
+    conn: sqlite3.Connection, sql: str, params: tuple[Any, ...]
+) -> list[sqlite3.Row]:
+    try:
+        return conn.execute(sql, params).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return []
+
+
 def _competitor_rows_today(
     conn: sqlite3.Connection, brand_id: int, engine: str, lens: str
 ) -> tuple[Optional[int], int, list[dict]]:
@@ -345,19 +356,15 @@ def _competitor_rows_today(
         (run_id, lens),
     ).fetchone()
     n_overviews = int(nov["n_overviews"]) if nov and nov["n_overviews"] is not None else 0
-    try:
-        rows = conn.execute(
-            """
-            SELECT domain, is_brand, appearances_sources, appearances_citations,
-                   avg_source_position, avg_citation_position
-            FROM domain_stats WHERE run_id = ? AND lens = ?
-            """,
-            (run_id, lens),
-        ).fetchall()
-    except sqlite3.OperationalError as exc:
-        if "no such table" not in str(exc):
-            raise
-        rows = []
+    rows = _fetch_optional(
+        conn,
+        """
+        SELECT domain, is_brand, appearances_sources, appearances_citations,
+               avg_source_position, avg_citation_position
+        FROM domain_stats WHERE run_id = ? AND lens = ?
+        """,
+        (run_id, lens),
+    )
     out = [
         {
             "domain": r["domain"],
@@ -384,25 +391,21 @@ def _competitor_rows_all(
         (brand_id, engine, lens),
     ).fetchone()
     n_overviews = int(nov["nov"]) if nov and nov["nov"] is not None else 0
-    try:
-        rows = conn.execute(
-            """
-            SELECT d.domain,
-                   MAX(d.is_brand) AS is_brand,
-                   SUM(d.appearances_sources) AS app_s,
-                   SUM(d.appearances_citations) AS app_c,
-                   SUM(d.sum_min_source_rank) AS sum_s,
-                   SUM(d.sum_min_citation_rank) AS sum_c
-            FROM domain_stats d JOIN runs r ON r.id = d.run_id
-            WHERE r.brand_id = ? AND r.engine = ? AND r.status = 'done' AND d.lens = ?
-            GROUP BY d.domain
-            """,
-            (brand_id, engine, lens),
-        ).fetchall()
-    except sqlite3.OperationalError as exc:
-        if "no such table" not in str(exc):
-            raise
-        rows = []
+    rows = _fetch_optional(
+        conn,
+        """
+        SELECT d.domain,
+               MAX(d.is_brand) AS is_brand,
+               SUM(d.appearances_sources) AS app_s,
+               SUM(d.appearances_citations) AS app_c,
+               SUM(d.sum_min_source_rank) AS sum_s,
+               SUM(d.sum_min_citation_rank) AS sum_c
+        FROM domain_stats d JOIN runs r ON r.id = d.run_id
+        WHERE r.brand_id = ? AND r.engine = ? AND r.status = 'done' AND d.lens = ?
+        GROUP BY d.domain
+        """,
+        (brand_id, engine, lens),
+    )
     out: list[dict] = []
     for r in rows:
         app_s = int(r["app_s"] or 0)

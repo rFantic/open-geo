@@ -14,7 +14,7 @@ def _i18n_path(name: str) -> str:
     return os.path.join(_I18N_DIR, name)
 
 
-def _load_json(path: str) -> dict[str, Any]:
+def _load_json(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
@@ -43,8 +43,7 @@ class Translator:
     def __init__(self, lang: str = DEFAULT_LANG):
         self.lang = lang or DEFAULT_LANG
 
-        base = _flatten(_load_json(_i18n_path(f"{DEFAULT_LANG}.json")))
-        merged = dict(base)
+        merged = _flatten(_load_json(_i18n_path(f"{DEFAULT_LANG}.json")))
         if self.lang != DEFAULT_LANG:
             lang_path = _i18n_path(f"{self.lang}.json")
             if os.path.isfile(lang_path):

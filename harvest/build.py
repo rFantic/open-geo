@@ -5,12 +5,14 @@ import csv
 import io
 import json
 import sys
+from typing import get_args
 
 from pydantic import ValidationError
 
 from harvest.schema import QuestionCandidate, contains_brand, normalize_query
+from pipeline.schema import Lens
 
-LENSES = ("general", "branded", "comparative")
+LENSES = get_args(Lens)
 
 
 def _error(index: int, raw: object, field: str, msg: str) -> dict:
