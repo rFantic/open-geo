@@ -5,7 +5,7 @@ argument-hint: "<questions.csv> <engine> <domain> --brand <name> --n-worker <N> 
 disable-model-invocation: true
 allowed-tools: Read, Write, Bash(.venv/bin/python:*), Bash(npm:*), Bash(uvicorn:*), Bash(mktemp:*), Task, AskUserQuestion
 # Orchestrator-only tools. STEP A uses AskUserQuestion for the parameter wizard; Task spawns the
-# N capture sub-agents (STEP 3). Browser capture tools (mcp__Claude_in_Chrome__*) live on the
+# N capture sub-agents (STEP 3). Browser capture tools (mcp__claude-in-chrome__*) live on the
 # capture-worker subagent (.claude/agents/capture-worker.md) — the orchestrator never drives Chrome.
 # disable-model-invocation: this run opens a real logged-in Chrome, writes data/aeo.db and spawns N
 # parallel workers, so it is /open-geo-ONLY (no auto-invoke).

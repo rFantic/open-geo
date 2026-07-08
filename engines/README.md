@@ -65,4 +65,4 @@ backlog spec is **ROADMAP Feature 3**.
    `sources ⊇ citations` invariant holds, then add the engine to the table above.
 
 See [`../pipeline/INTERFACES.md`](../pipeline/INTERFACES.md) (§1 contract, §4 metric model)
-and [`../ROADMAP.md`](../ROADMAP.md) (Feature 3) for the authoritative detail.
+for the authoritative detail; multi-engine expansion is tracked as **ROADMAP Feature 3**.
