@@ -42,6 +42,23 @@
       "analyzed_commit": "603595fdfad56dbe01dde5f020c2d897688d789f",
       "analyzed_at": "2026-07-17T04:45:36Z",
       "status": "current"
+    },
+    {
+      "id": "git-remote-setup",
+      "file": "docs/git-remote-setup.md",
+      "title": "Git Remote Configuration & Fork Workflow",
+      "tags": [
+        "git",
+        "fork",
+        "remotes",
+        "github",
+        "setup"
+      ],
+      "scope": "Documents the git remote topology: origin points to the rFantic/open-geo fork (push target), upstream to Pupok462/open-geo (source of truth). Covers how the fork was created, how to sync with upstream, and the push permission model.",
+      "source_files": [],
+      "analyzed_commit": "3d35dba72728dfe5ad0070e2346278f9241a234c",
+      "analyzed_at": "2026-07-17T05:05:31Z",
+      "status": "current"
     }
   ]
 }
