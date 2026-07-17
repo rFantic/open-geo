@@ -1,0 +1,47 @@
+{
+  "version": 2,
+  "docs": [
+    {
+      "id": "sandbox-python-nodejs-setup",
+      "file": "docs/sandbox-python-nodejs-setup.md",
+      "title": "Sandbox Python & Node.js Environment Setup",
+      "tags": [
+        "setup",
+        "uv",
+        "npm",
+        "sandbox",
+        "environment"
+      ],
+      "scope": "Guides a developer through installing dependencies and running tests inside this distrobox sandbox, where /tmp is ephemeral and parts of the home directory are read-only.",
+      "source_files": [
+        ".gitignore",
+        "pyproject.toml",
+        "package.json",
+        "vitest.config.ts"
+      ],
+      "analyzed_commit": "603595fdfad56dbe01dde5f020c2d897688d789f",
+      "analyzed_at": "2026-07-14T01:54:31Z",
+      "status": "current"
+    },
+    {
+      "id": "node-version-pinning",
+      "file": "docs/node-version-pinning.md",
+      "title": "Node Version Pinning for Frontend",
+      "tags": [
+        "setup",
+        "node",
+        "nvm",
+        "ci",
+        "frontend"
+      ],
+      "scope": "Explains how the frontend Node.js version is pinned via .nvmrc and package.json engines, ensuring local dev matches CI and avoiding jsdom incompatibilities with newer Node releases.",
+      "source_files": [
+        "dashboard/web/.nvmrc",
+        "dashboard/web/package.json"
+      ],
+      "analyzed_commit": "603595fdfad56dbe01dde5f020c2d897688d789f",
+      "analyzed_at": "2026-07-17T04:45:36Z",
+      "status": "current"
+    }
+  ]
+}
