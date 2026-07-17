@@ -26,6 +26,7 @@
 
 # --- Python ---
 .venv/
+.uv/
 venv/
 env/
 __pycache__/
